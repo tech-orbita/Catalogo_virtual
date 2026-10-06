@@ -88,6 +88,11 @@ ORBITA_CRM_CONTACT_COUNTRY=CO
 ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY=resumen_de_cotizacion
 ORBITA_CRM_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY=productos_no_disponibles
 ORBITA_CRM_QUOTE_WORKFLOW_ID=REEMPLAZAR_ID_WORKFLOW
+ORBITA_CRM_ORDER_CONFIRMATION_CUSTOM_FIELD_KEY=confirmacion_nuevo_pedido
+ORBITA_CRM_ORDER_CONFIRMATION_WORKFLOW_ID=REEMPLAZAR_ID_WORKFLOW_CLIENTE
+ORBITA_CRM_NEW_ORDER_CUSTOM_FIELD_KEY=notificacion_nuevo_pedido
+ORBITA_CRM_NEW_ORDER_WORKFLOW_ID=REEMPLAZAR_ID_WORKFLOW_INTERNO
+ORBITA_LOGISTICS_WHATSAPP_NUMBER=3508811341
 ```
 
 El Private Integration Token debe pertenecer a la subcuenta y tener `contacts.write`, además de los permisos de oportunidades que ya usa el panel. Ya no necesita `conversations/message.write` para cotizar. Si deseas guardar la cédula como un campo visible independiente, crea el custom field en el CRM y agrega su id como `ORBITA_CRM_CEDULA_CUSTOM_FIELD_ID`; de todas formas, la cédula y el resto del pedido quedan incluidos en la nota.
@@ -102,6 +107,8 @@ La app ejecuta solamente estas operaciones:
 
 El número remitente, el proveedor y los botones no se envían por la API de conversaciones. Sin las keys de los campos y el ID del workflow, el pedido no cambia a cotización enviada.
 
+Al crear un pedido desde el catálogo, la app activa el workflow de confirmación en el contacto del cliente. Para recoger, toma `store_locations.whatsapp_number`, crea o actualiza el contacto operativo de la sede y vuelve a añadirlo al workflow interno de nuevo pedido. Para domicilio no acepta sede desde el navegador: usa el contacto del centro logístico configurado en `ORBITA_LOGISTICS_WHATSAPP_NUMBER`. El workflow interno debe permitir reingreso para que una misma sede pueda recibir pedidos sucesivos.
+
 La configuración exacta del workflow, la sintaxis de goGHL.ai y las ramas de aprobación/rechazo está en `docs/ghl-quote-workflow.md`.
 
-Antes de operar en producción, aplica también `supabase/migrations/20261006172937_order_quote_builder.sql`, vuelve a desplegar las variables y prueba con un contacto autorizado. Una activación exitosa confirma que GHL aceptó el contacto en el workflow; no confirma que goGHL.ai haya entregado el mensaje.
+Antes de operar en producción, aplica también `supabase/migrations/20261006172937_order_quote_builder.sql` y `supabase/migrations/20261006180732_allow_delivery_orders_without_store_location.sql`, vuelve a desplegar las variables y prueba con un contacto autorizado. Una activación exitosa confirma que GHL aceptó el contacto en el workflow; no confirma que goGHL.ai haya entregado el mensaje.

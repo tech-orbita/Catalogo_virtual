@@ -45,6 +45,7 @@ interface CrmContactUpdateResponse {
 
 interface CrmWorkflowEnrollmentResponse {
   succeeded?: boolean;
+  /** Compatibilidad con la respuesta antigua de HighLevel. */
   succeded?: boolean;
 }
 
@@ -119,7 +120,7 @@ function getConfig() {
 
   if (!apiKey || !locationId) {
     throw new CrmConfigurationError(
-      "Configura ORBITA_CRM_API_KEY y ORBITA_CRM_LOCATION_ID para sincronizar contactos y enviar cotizaciones."
+      "Configura ORBITA_CRM_API_KEY y ORBITA_CRM_LOCATION_ID para sincronizar contactos y preparar cotizaciones."
     );
   }
 
@@ -467,6 +468,77 @@ export async function createCrmContactNote(contactId: string, title: string, bod
   return response.note?.id ?? null;
 }
 
+async function triggerCrmMessageWorkflow(input: {
+  contactId: string;
+  message: string;
+  customFieldKey: string | undefined;
+  workflowId: string | undefined;
+  configurationError: string;
+}) {
+  if (!input.customFieldKey || !input.workflowId) {
+    throw new CrmConfigurationError(input.configurationError);
+  }
+
+  const encodedContactId = encodeURIComponent(input.contactId);
+  const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      customFields: [{ key: input.customFieldKey, fieldValue: input.message }],
+    }),
+  });
+  if (
+    updated.succeeded === false ||
+    (updated.contact?.id && updated.contact.id !== input.contactId)
+  ) {
+    throw new Error("El CRM no confirmó la actualización del mensaje del pedido.");
+  }
+
+  const enrolled = await crmRequest<CrmWorkflowEnrollmentResponse>(
+    `/contacts/${encodedContactId}/workflow/${encodeURIComponent(input.workflowId)}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
+    }
+  );
+  if (enrolled.succeeded !== true && enrolled.succeded !== true) {
+    throw new Error("El CRM no confirmó la activación del workflow del pedido.");
+  }
+}
+
+export async function triggerCrmOrderConfirmationWorkflow(contactId: string, message: string) {
+  return triggerCrmMessageWorkflow({
+    contactId,
+    message,
+    customFieldKey: readEnv(
+      "ORBITA_CRM_ORDER_CONFIRMATION_CUSTOM_FIELD_KEY",
+      "GHL_ORDER_CONFIRMATION_CUSTOM_FIELD_KEY"
+    ),
+    workflowId: readEnv(
+      "ORBITA_CRM_ORDER_CONFIRMATION_WORKFLOW_ID",
+      "GHL_ORDER_CONFIRMATION_WORKFLOW_ID"
+    ),
+    configurationError:
+      "Configura el campo y el workflow de confirmación de pedidos para clientes.",
+  });
+}
+
+export async function triggerCrmNewOrderNotificationWorkflow(contactId: string, message: string) {
+  return triggerCrmMessageWorkflow({
+    contactId,
+    message,
+    customFieldKey: readEnv(
+      "ORBITA_CRM_NEW_ORDER_CUSTOM_FIELD_KEY",
+      "GHL_NEW_ORDER_CUSTOM_FIELD_KEY"
+    ),
+    workflowId: readEnv(
+      "ORBITA_CRM_NEW_ORDER_WORKFLOW_ID",
+      "GHL_NEW_ORDER_WORKFLOW_ID"
+    ),
+    configurationError:
+      "Configura el campo y el workflow interno de notificaciones de nuevo pedido.",
+  });
+}
+
 function getQuoteWorkflowConfig() {
   const quoteFieldKey = readEnv(
     "ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY",
@@ -487,6 +559,11 @@ function getQuoteWorkflowConfig() {
   return { quoteFieldKey, unavailableProductsFieldKey, workflowId };
 }
 
+/**
+ * Guarda el resumen en el contacto y lo inscribe en el workflow de GHL.
+ * La aplicación no crea mensajes: el proveedor, el número remitente y los
+ * botones interactivos pertenecen exclusivamente al workflow configurado.
+ */
 export async function triggerCrmQuoteWorkflow(
   contactId: string,
   quoteSummary: string,
@@ -512,7 +589,7 @@ export async function triggerCrmQuoteWorkflow(
   const enrolled = await crmRequest<CrmWorkflowEnrollmentResponse>(
     `/contacts/${encodedContactId}/workflow/${encodeURIComponent(workflowId)}`,
     {
-    method: "POST",
+      method: "POST",
       body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
     }
   );

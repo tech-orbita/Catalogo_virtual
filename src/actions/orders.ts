@@ -8,10 +8,19 @@ import {
   CrmConfigurationError,
   syncCrmOrderCreatedOpportunities,
   syncCrmProductOpportunityStage,
+  triggerCrmNewOrderNotificationWorkflow,
+  triggerCrmOrderConfirmationWorkflow,
   triggerCrmQuoteWorkflow,
   upsertCrmContact,
 } from "@/lib/crm";
-import { buildOrderCrmNote, buildStructuredQuoteMessage, QUOTE_SUMMARY_MAX_LENGTH } from "@/lib/messaging";
+import {
+  buildOperationalOrderAlert,
+  buildOrderCrmNote,
+  buildOrderReceivedMessage,
+  buildStructuredQuoteMessage,
+  DELIVERY_MINIMUM_SUBTOTAL,
+  QUOTE_SUMMARY_MAX_LENGTH,
+} from "@/lib/messaging";
 import {
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
@@ -30,6 +39,7 @@ export interface CreateOrderInput {
   locationId?: string;
   deliveryMethod: DeliveryMethod;
   address?: string;
+  neighborhood?: string;
   addressDetails?: string;
   city?: string;
   department?: string;
@@ -64,6 +74,7 @@ export interface CreateOrderResult {
   locationName: string | null;
   locationAddress: string | null;
   crmSynced: boolean;
+  customerConfirmationSent: boolean;
   warning?: string;
 }
 
@@ -87,6 +98,7 @@ type ValidatedLocation = {
   id: string;
   name: string;
   address: string | null;
+  whatsappNumber: string;
 };
 
 const ORDER_STATUSES = new Set(Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]);
@@ -139,6 +151,12 @@ function validateCustomer(input: Omit<CreateOrderInput, "items">): string | null
   if (input.deliveryMethod === "domicilio" && !input.address?.trim()) {
     return "La dirección es obligatoria para domicilio.";
   }
+  if (input.deliveryMethod === "domicilio" && !input.neighborhood?.trim()) {
+    return "El barrio es obligatorio para domicilio.";
+  }
+  if (input.deliveryMethod === "domicilio" && !input.addressDetails?.trim()) {
+    return "Las indicaciones para llegar son obligatorias para domicilio.";
+  }
   return null;
 }
 
@@ -159,7 +177,7 @@ async function validateLocationSelection(
   if (locationId) {
     const { data, error } = await supabase
       .from("store_locations")
-      .select("id, name, address, active")
+      .select("id, name, address, whatsapp_number, active")
       .eq("id", locationId)
       .maybeSingle();
 
@@ -168,7 +186,14 @@ async function validateLocationSelection(
       return { error: "La sede seleccionada no está disponible." };
     }
 
-    return { location: { id: data.id, name: data.name, address: data.address } };
+    return {
+      location: {
+        id: data.id,
+        name: data.name,
+        address: data.address,
+        whatsappNumber: data.whatsapp_number,
+      },
+    };
   }
 
   if (options.requireWhenAvailable) {
@@ -262,7 +287,7 @@ async function prepareCrmContact(
       email: input.customerEmail,
       phone: input.customerPhone,
       cedula: input.customerCedula,
-      address: [input.address, input.addressDetails].filter(Boolean).join(", ") || null,
+      address: [input.address, input.neighborhood, input.addressDetails].filter(Boolean).join(", ") || null,
       city: input.city,
       department: input.department,
       source: source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
@@ -302,6 +327,7 @@ function buildRpcInput(
     p_customer_email: input.customerEmail?.trim() || "",
     p_delivery_method: input.deliveryMethod,
     p_address: input.address?.trim() || null,
+    p_neighborhood: input.neighborhood?.trim() || null,
     p_address_details: input.addressDetails?.trim() || null,
     p_city: input.city?.trim() || null,
     p_department: input.department?.trim() || null,
@@ -340,6 +366,7 @@ async function attachOrderNote(input: {
         customerPhone: input.customer.customerPhone,
         deliveryMethod: input.customer.deliveryMethod,
         address: input.customer.address,
+        neighborhood: input.customer.neighborhood,
         addressDetails: input.customer.addressDetails,
         city: input.customer.city,
         department: input.customer.department,
@@ -362,6 +389,88 @@ async function attachOrderNote(input: {
   }
 }
 
+async function sendCreatedOrderNotifications(input: {
+  contactId: string | null;
+  orderNumber: number;
+  customer: Omit<CreateOrderInput, "items">;
+  location: ValidatedLocation | null;
+  items: ResolvedOrderItem[];
+  subtotal: number;
+}) {
+  const messageInput = {
+    orderNumber: input.orderNumber,
+    customerName: input.customer.customerName,
+    customerPhone: input.customer.customerPhone,
+    customerCedula: input.customer.customerCedula,
+    customerEmail: input.customer.customerEmail,
+    deliveryMethod: input.customer.deliveryMethod,
+    address: input.customer.address,
+    neighborhood: input.customer.neighborhood,
+    addressDetails: input.customer.addressDetails,
+    city: input.customer.city,
+    department: input.customer.department,
+    locationName: input.location?.name ?? null,
+    notes: input.customer.notes,
+    items: input.items.map((item) => ({
+      productName: item.productName,
+      variantLabel: item.variantLabel,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+    })),
+    subtotal: input.subtotal,
+  };
+  const warnings: string[] = [];
+  let customerConfirmationSent = false;
+
+  if (input.contactId) {
+    try {
+      await triggerCrmOrderConfirmationWorkflow(
+        input.contactId,
+        buildOrderReceivedMessage(messageInput)
+      );
+      customerConfirmationSent = true;
+    } catch (error) {
+      warnings.push(`No se pudo enviar la confirmación al cliente: ${errorMessage(error)}`);
+    }
+  } else {
+    warnings.push("No se pudo enviar la confirmación porque el contacto no quedó sincronizado.");
+  }
+
+  const operationalRecipient =
+    input.customer.deliveryMethod === "domicilio"
+      ? {
+          name: "Centro logístico domicilios",
+          phone: process.env.ORBITA_LOGISTICS_WHATSAPP_NUMBER?.trim() || "3508811341",
+        }
+      : input.location
+        ? { name: `Sede ${input.location.name}`, phone: input.location.whatsappNumber }
+        : null;
+
+  if (operationalRecipient) {
+    try {
+      const operationalContactId = await upsertCrmContact({
+        name: operationalRecipient.name,
+        phone: operationalRecipient.phone,
+        source: "Alertas operativas - catálogo virtual",
+      });
+      await triggerCrmNewOrderNotificationWorkflow(
+        operationalContactId,
+        buildOperationalOrderAlert(messageInput)
+      );
+    } catch (error) {
+      warnings.push(`No se pudo enviar el aviso operativo: ${errorMessage(error)}`);
+    }
+  } else {
+    warnings.push("No se pudo determinar el destinatario del aviso operativo.");
+  }
+
+  return {
+    customerConfirmationSent,
+    warning: warnings.length > 0 ? warnings.join(" ") : null,
+  };
+}
+
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<CreateOrderResult | { error: string }> {
@@ -371,13 +480,27 @@ export async function createOrder(
   const resolved = await resolveItems(input.items, false);
   if ("error" in resolved) return resolved;
 
-  const locationResult = await validateLocationSelection(input.locationId, {
+  const subtotal = resolved.items.reduce((sum, item) => sum + item.subtotal, 0);
+  if (input.deliveryMethod === "domicilio" && subtotal <= DELIVERY_MINIMUM_SUBTOTAL) {
+    return {
+      error: `Los pedidos a domicilio deben superar ${DELIVERY_MINIMUM_SUBTOTAL.toLocaleString("es-CO", {
+        style: "currency",
+        currency: "COP",
+        maximumFractionDigits: 0,
+      })} en productos.`,
+    };
+  }
+
+  const customerInput: Omit<CreateOrderInput, "items"> = {
+    ...input,
+    locationId: input.deliveryMethod === "recoger" ? input.locationId : undefined,
+  };
+  const locationResult = await validateLocationSelection(customerInput.locationId, {
     allowInactive: false,
-    requireWhenAvailable: true,
+    requireWhenAvailable: customerInput.deliveryMethod === "recoger",
   });
   if ("error" in locationResult) return locationResult;
 
-  const customerInput: Omit<CreateOrderInput, "items"> = input;
   const crm = await prepareCrmContact(customerInput, "catalogo");
   const rpcInput = buildRpcInput(customerInput, resolved.items, crm);
   const supabase = await createClient();
@@ -404,6 +527,14 @@ export async function createOrder(
     total: rpcInput.p_subtotal,
     includeAgentPipeline: true,
   });
+  const notification = await sendCreatedOrderNotifications({
+    contactId: crm.contactId,
+    orderNumber: order.order_number,
+    customer: customerInput,
+    location: locationResult.location,
+    items: resolved.items,
+    subtotal: rpcInput.p_subtotal,
+  });
 
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
@@ -415,7 +546,8 @@ export async function createOrder(
     locationName: order.location_name ?? null,
     locationAddress: order.location_address ?? null,
     crmSynced: crm.status === "sincronizado",
-    warning: joinWarnings(crm.error, noteWarning, opportunityWarning),
+    customerConfirmationSent: notification.customerConfirmationSent,
+    warning: joinWarnings(crm.error, noteWarning, opportunityWarning, notification.warning),
   };
 }
 
@@ -474,6 +606,7 @@ export async function createManualOrder(
     locationName: location?.name ?? null,
     locationAddress: location?.address ?? null,
     crmSynced: crm.status === "sincronizado",
+    customerConfirmationSent: false,
     warning: joinWarnings(crm.error, noteWarning, opportunityWarning),
   };
 }
@@ -501,7 +634,9 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
         email: order.customer_email,
         phone: order.customer_phone,
         cedula: order.customer_cedula,
-        address: [order.address, order.address_details].filter(Boolean).join(", ") || null,
+        address: [order.address, order.neighborhood, order.address_details]
+          .filter(Boolean)
+          .join(", ") || null,
         city: order.city,
         department: order.department,
         source: order.order_source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
@@ -612,7 +747,9 @@ export async function triggerOrderQuoteWorkflow(
       email: order.customer_email,
       phone: order.customer_phone,
       cedula: order.customer_cedula,
-      address: [order.address, order.address_details].filter(Boolean).join(", ") || null,
+      address: [order.address, order.neighborhood, order.address_details]
+        .filter(Boolean)
+        .join(", ") || null,
       city: order.city,
       department: order.department,
       source: order.order_source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
@@ -647,6 +784,8 @@ export async function triggerOrderQuoteWorkflow(
         ghl_sync_status: "sincronizado",
         ghl_sync_error: null,
         ghl_synced_at: new Date().toISOString(),
+        // El mensaje lo crea el workflow. Limpiamos IDs antiguos para no
+        // atribuirle al nuevo intento un mensaje enviado por la integración previa.
         ghl_message_id: null,
         ghl_conversation_id: null,
       })
@@ -679,7 +818,11 @@ export async function triggerOrderQuoteWorkflow(
         .from("orders")
         .update({ ghl_sync_status: "error", ghl_sync_error: technicalWarning.slice(0, 500) })
         .eq("id", orderId);
-      return { success: true, status: nextStatus, warning: "La cotización quedó preparada, pero su estado externo necesita revisión." };
+      return {
+        success: true,
+        status: nextStatus,
+        warning: "La cotización quedó preparada, pero su estado externo necesita revisión.",
+      };
     }
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);

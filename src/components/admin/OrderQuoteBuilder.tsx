@@ -178,18 +178,17 @@ export function OrderQuoteBuilder({
         deliveryFee: parsedDeliveryFee,
       });
 
-      if ("error" in result) {
-        const failureMessage = result.error ?? "No se pudo enviar la cotización.";
-        setFeedback({ kind: "error", message: failureMessage });
+      if ("error" in result && result.error) {
+        setFeedback({ kind: "error", message: result.error });
         toast.update(toastId, {
           variant: "error",
           title: "No se pudo enviar la cotización",
-          description: failureMessage,
+          description: result.error,
         });
         return;
       }
 
-      const nextStatus = result.status;
+      const nextStatus = result.status ?? "cotizacion_enviada";
       const successMessage =
         nextStatus === "no_hubo_producto"
           ? "Se informó que los productos no están disponibles."
@@ -248,6 +247,9 @@ export function OrderQuoteBuilder({
               <p className="mt-1 text-sm text-slate-600">Sede: {order.location_name_snapshot}</p>
             ) : null}
             {order.address ? <p className="text-sm text-slate-600">{order.address}</p> : null}
+            {order.neighborhood ? (
+              <p className="text-sm text-slate-600">Barrio: {order.neighborhood}</p>
+            ) : null}
             {order.address_details ? <p className="text-sm text-slate-600">{order.address_details}</p> : null}
             {order.city || order.department ? (
               <p className="text-sm text-slate-600">

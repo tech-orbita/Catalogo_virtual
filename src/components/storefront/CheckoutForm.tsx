@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { useCart } from "@/context/cart-context";
 import { formatCOP } from "@/lib/currency";
+import { DELIVERY_MINIMUM_SUBTOTAL } from "@/lib/messaging";
 import { createOrder } from "@/actions/orders";
 import { useToast } from "@/components/ui/Toast";
 import type { DeliveryMethod, StoreLocation } from "@/lib/types";
@@ -24,6 +25,7 @@ export function CheckoutForm({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
   const [addressDetails, setAddressDetails] = useState("");
   const [city, setCity] = useState("");
   const [department, setDepartment] = useState("");
@@ -34,15 +36,24 @@ export function CheckoutForm({
   const [confirmation, setConfirmation] = useState<{
     orderNumber: number;
     locationName: string | null;
+    customerConfirmationSent: boolean;
   } | null>(null);
   const selectedLocation = locations.find((location) => location.id === locationId) ?? null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (items.length === 0) return;
-    if (locations.length > 0 && !selectedLocation) {
+    if (deliveryMethod === "recoger" && locations.length > 0 && !selectedLocation) {
       setError("Selecciona la sede que atenderá el pedido.");
       toast.warning("Selecciona la sede que atenderá el pedido");
+      return;
+    }
+    if (deliveryMethod === "domicilio" && subtotal <= DELIVERY_MINIMUM_SUBTOTAL) {
+      const minimumError = `Los pedidos a domicilio deben superar ${formatCOP(DELIVERY_MINIMUM_SUBTOTAL)} en productos.`;
+      setError(minimumError);
+      toast.warning("El pedido no alcanza el mínimo para domicilio", {
+        description: minimumError,
+      });
       return;
     }
     setSubmitting(true);
@@ -54,9 +65,10 @@ export function CheckoutForm({
       customerCedula: cedula,
       customerPhone: phone,
       customerEmail: email,
-      locationId: selectedLocation?.id,
+      locationId: deliveryMethod === "recoger" ? selectedLocation?.id : undefined,
       deliveryMethod,
       address: deliveryMethod === "domicilio" ? address : undefined,
+      neighborhood: deliveryMethod === "domicilio" ? neighborhood : undefined,
       addressDetails: deliveryMethod === "domicilio" ? addressDetails : undefined,
       city: deliveryMethod === "domicilio" ? city : undefined,
       department: deliveryMethod === "domicilio" ? department : undefined,
@@ -79,6 +91,7 @@ export function CheckoutForm({
     setConfirmation({
       orderNumber: result.orderNumber,
       locationName: result.locationName,
+      customerConfirmationSent: result.customerConfirmationSent,
     });
     clear();
     toast.update(toastId, {
@@ -100,6 +113,11 @@ export function CheckoutForm({
         <p className="mt-2 text-sm text-[#545454]/65">
           Quedó pendiente por cotizar. Un asesor revisará los artículos y te enviará la cotización.
         </p>
+        {confirmation.customerConfirmationSent && (
+          <p className="mt-2 text-sm text-[#545454]/65">
+            También enviamos a tu teléfono la confirmación con los datos recibidos.
+          </p>
+        )}
         {confirmation.locationName && (
           <p className="mt-2 rounded-full bg-orbita-cyan-soft px-3 py-1 text-xs font-semibold text-orbita-navy">
             Atendido por {confirmation.locationName}
@@ -139,14 +157,14 @@ export function CheckoutForm({
       <h1 className="mb-5 text-xl font-semibold">Finalizar pedido</h1>
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        {locations.length > 0 && (
+        {deliveryMethod === "recoger" && locations.length > 0 && (
           <section className="space-y-3 rounded-2xl border border-orbita-cyan/30 bg-orbita-cyan-soft/45 p-4">
             <div className="flex items-start gap-2.5">
               <MapPin size={18} className="mt-0.5 shrink-0 text-orbita-cyan-dark" aria-hidden="true" />
               <div>
-                <h2 className="text-sm font-semibold text-orbita-navy">Sede que atenderá tu pedido</h2>
+                <h2 className="text-sm font-semibold text-orbita-navy">Sede donde recogerás</h2>
                 <p className="mt-0.5 text-xs leading-5 text-slate-500">
-                  Esta sede revisará la disponibilidad y preparará tu cotización.
+                  La sede recibirá automáticamente el aviso de tu pedido.
                 </p>
               </div>
             </div>
@@ -214,7 +232,11 @@ export function CheckoutForm({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setDeliveryMethod("domicilio")}
+              onClick={() => {
+                setDeliveryMethod("domicilio");
+                setLocationId("");
+                setError(null);
+              }}
               className={clsx(
                 "rounded-lg border px-3 py-2.5 text-sm font-medium",
                 deliveryMethod === "domicilio"
@@ -226,7 +248,10 @@ export function CheckoutForm({
             </button>
             <button
               type="button"
-              onClick={() => setDeliveryMethod("recoger")}
+              onClick={() => {
+                setDeliveryMethod("recoger");
+                setError(null);
+              }}
               className={clsx(
                 "rounded-lg border px-3 py-2.5 text-sm font-medium",
                 deliveryMethod === "recoger"
@@ -240,6 +265,14 @@ export function CheckoutForm({
 
           {deliveryMethod === "domicilio" && (
             <div className="space-y-3">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-xs leading-5 text-amber-950">
+                <p className="font-semibold">Políticas de domicilio</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  <li>El pedido de productos debe superar {formatCOP(DELIVERY_MINIMUM_SUBTOTAL)}.</li>
+                  <li>El valor final del domicilio se informa en la cotización.</li>
+                  <li>Fuera de Bogotá o Soacha, el envío se cotiza aparte mediante transportadora.</li>
+                </ul>
+              </div>
               <input
                 required
                 placeholder="Dirección"
@@ -248,10 +281,19 @@ export function CheckoutForm({
                 className="w-full rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
               />
               <input
-                placeholder="Detalles (apto, torre, barrio...)"
+                required
+                placeholder="Barrio"
+                value={neighborhood}
+                onChange={(e) => setNeighborhood(e.target.value)}
+                className="w-full rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+              />
+              <textarea
+                required
+                rows={3}
+                placeholder="Indicaciones para llegar (torre, apartamento, punto de referencia...)"
                 value={addressDetails}
                 onChange={(e) => setAddressDetails(e.target.value)}
-                className="w-full rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+                className="w-full resize-y rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
               />
               <div className="grid grid-cols-2 gap-3">
                 <input
@@ -292,7 +334,10 @@ export function CheckoutForm({
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={
+            submitting ||
+            (deliveryMethod === "domicilio" && subtotal <= DELIVERY_MINIMUM_SUBTOTAL)
+          }
           className="w-full rounded-lg bg-brand py-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
         >
           {submitting ? "Enviando..." : "Solicitar cotización"}

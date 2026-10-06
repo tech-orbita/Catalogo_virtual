@@ -22,6 +22,6 @@ Para crear el primer usuario administrador usa Supabase Authentication o el help
 
 ## CRM de Órbita IA
 
-La integración server-side usa `ORBITA_CRM_API_KEY` (Private Integration Token) y `ORBITA_CRM_LOCATION_ID`. El token necesita los scopes `contacts.write` y `conversations/message.write`. Los datos del cliente se crean o actualizan al guardar el pedido y el resumen completo queda como nota del contacto.
+La integración server-side usa `ORBITA_CRM_API_KEY` (Private Integration Token) y `ORBITA_CRM_LOCATION_ID`. Los datos del cliente se crean o actualizan al guardar el pedido y el resumen completo queda como nota del contacto. Las confirmaciones, cotizaciones y alertas operativas se disparan añadiendo contactos a workflows internos de GHL; la aplicación no envía mensajes directamente por la API de conversaciones.
 
 El paso a paso de publicación, iframe, sesión, variables y prueba controlada está en [docs/orbita-iframe-setup.md](docs/orbita-iframe-setup.md).

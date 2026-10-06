@@ -113,6 +113,7 @@ export interface Order {
   customer_email?: string | null;
   delivery_method: DeliveryMethod;
   address: string | null;
+  neighborhood: string | null;
   address_details: string | null;
   city: string | null;
   department: string | null;

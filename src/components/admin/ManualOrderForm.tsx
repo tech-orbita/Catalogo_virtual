@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Search, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { createManualOrder } from "@/actions/orders";
 import { useToast } from "@/components/ui/Toast";
@@ -28,6 +28,141 @@ function newLine(index: number): DraftLine {
   return { id: `line-${Date.now()}-${index}`, optionKey: "", quantity: "1", unitPrice: "" };
 }
 
+function normalizeSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .trim();
+}
+
+function ProductSearchSelect({
+  lineId,
+  value,
+  options,
+  onChange,
+}: {
+  lineId: string;
+  value: string;
+  options: ManualOrderCatalogOption[];
+  onChange: (optionKey: string) => void;
+}) {
+  const selected = options.find((option) => option.key === value) ?? null;
+  const [query, setQuery] = useState(selected?.label ?? "");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const normalizedQuery = normalizeSearch(query);
+  const searchTerms = normalizedQuery.split(/\s+/).filter(Boolean);
+  const filteredOptions = options
+    .filter((option) => {
+      const label = normalizeSearch(option.label);
+      return searchTerms.every((term) => label.includes(term));
+    })
+    .slice(0, 40);
+  const listboxId = `${lineId}-product-options`;
+
+  function choose(option: ManualOrderCatalogOption) {
+    setQuery(option.label);
+    onChange(option.key);
+    setOpen(false);
+    setActiveIndex(0);
+  }
+
+  function commitExactMatch() {
+    const exact = options.find(
+      (option) => normalizeSearch(option.label) === normalizeSearch(query)
+    );
+    if (exact) choose(exact);
+  }
+
+  return (
+    <div className="relative mt-1.5">
+      <div className="relative">
+        <Search
+          size={15}
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+        />
+        <input
+          required
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-autocomplete="list"
+          value={query}
+          placeholder="Escribe el nombre completo o varias palabras"
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            commitExactMatch();
+            window.setTimeout(() => setOpen(false), 120);
+          }}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setOpen(true);
+            setActiveIndex(0);
+            if (selected && nextQuery !== selected.label) onChange("");
+          }}
+          onKeyDown={(event) => {
+            if (!open && event.key === "ArrowDown") {
+              setOpen(true);
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.min(current + 1, filteredOptions.length - 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Enter" && filteredOptions[activeIndex]) {
+              event.preventDefault();
+              choose(filteredOptions[activeIndex]);
+            } else if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-9 text-sm outline-none focus:border-brand"
+        />
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
+        />
+      </div>
+
+      {open && (
+        <div
+          id={listboxId}
+          role="listbox"
+          className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
+        >
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option, index) => (
+              <button
+                key={option.key}
+                type="button"
+                role="option"
+                aria-selected={option.key === value}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => choose(option)}
+                className={clsx(
+                  "block w-full rounded-lg px-3 py-2 text-left text-sm",
+                  index === activeIndex ? "bg-brand-light text-brand" : "text-slate-700"
+                )}
+              >
+                {option.label}
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-3 text-sm text-slate-500">No encontramos productos con esa búsqueda.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ManualOrderForm({
   catalogOptions,
   locations,
@@ -44,6 +179,7 @@ export function ManualOrderForm({
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>("domicilio");
   const [locationId, setLocationId] = useState(locations.length === 1 ? locations[0].id : "");
   const [address, setAddress] = useState("");
+  const [neighborhood, setNeighborhood] = useState("");
   const [addressDetails, setAddressDetails] = useState("");
   const [city, setCity] = useState("");
   const [department, setDepartment] = useState("");
@@ -101,6 +237,7 @@ export function ManualOrderForm({
       locationId: locationId || undefined,
       deliveryMethod,
       address: deliveryMethod === "domicilio" ? address : undefined,
+      neighborhood: deliveryMethod === "domicilio" ? neighborhood : undefined,
       addressDetails: deliveryMethod === "domicilio" ? addressDetails : undefined,
       city: deliveryMethod === "domicilio" ? city : undefined,
       department: deliveryMethod === "domicilio" ? department : undefined,
@@ -198,22 +335,15 @@ export function ManualOrderForm({
                 key={line.id}
                 className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/70 p-3 sm:grid-cols-[minmax(0,1fr)_90px_130px_42px] sm:items-end"
               >
-                <label className="text-xs font-medium text-slate-600">
-                  Producto
-                  <select
-                    required
+                <div className="text-xs font-medium text-slate-600">
+                  <span>Producto</span>
+                  <ProductSearchSelect
+                    lineId={line.id}
                     value={line.optionKey}
-                    onChange={(event) => selectProduct(line.id, event.target.value)}
-                    className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2.5 text-sm outline-none focus:border-brand"
-                  >
-                    <option value="">Selecciona un artículo</option>
-                    {catalogOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    options={catalogOptions}
+                    onChange={(optionKey) => selectProduct(line.id, optionKey)}
+                  />
+                </div>
                 <label className="text-xs font-medium text-slate-600">
                   Cantidad
                   <input
@@ -303,11 +433,22 @@ export function ManualOrderForm({
                 />
               </label>
               <label className="text-xs font-medium text-slate-600 sm:col-span-2">
-                Detalles de la dirección
+                Barrio
                 <input
+                  required
+                  value={neighborhood}
+                  onChange={(event) => setNeighborhood(event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600 sm:col-span-2">
+                Indicaciones para llegar
+                <textarea
+                  required
+                  rows={3}
                   value={addressDetails}
                   onChange={(event) => setAddressDetails(event.target.value)}
-                  className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
+                  className="mt-1.5 w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
                 />
               </label>
               <label className="text-xs font-medium text-slate-600">
