@@ -178,7 +178,7 @@ export function OrderQuoteBuilder({
         deliveryFee: parsedDeliveryFee,
       });
 
-      if ("error" in result && result.error) {
+      if ("error" in result) {
         setFeedback({ kind: "error", message: result.error });
         toast.update(toastId, {
           variant: "error",
@@ -188,7 +188,7 @@ export function OrderQuoteBuilder({
         return;
       }
 
-      const nextStatus = result.status ?? "cotizacion_enviada";
+      const nextStatus = result.status;
       const successMessage =
         nextStatus === "no_hubo_producto"
           ? "Se informó que los productos no están disponibles."
