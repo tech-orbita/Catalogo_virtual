@@ -7,6 +7,8 @@ import {
   createCrmContactNote,
   CrmConfigurationError,
   sendCrmQuoteMessage,
+  syncCrmOrderCreatedOpportunities,
+  syncCrmProductOpportunityStage,
   upsertCrmContact,
 } from "@/lib/crm";
 import { buildOrderCrmNote, SMS_MAX_LENGTH } from "@/lib/messaging";
@@ -82,6 +84,39 @@ const PAYMENT_STATUSES = new Set(Object.keys(PAYMENT_STATUS_LABELS) as PaymentSt
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrió un error inesperado.";
+}
+
+function joinWarnings(...warnings: Array<string | null | undefined>) {
+  const messages = warnings.filter((warning): warning is string => Boolean(warning));
+  return messages.length > 0 ? messages.join(" ") : undefined;
+}
+
+async function syncCreatedOrderOpportunities(input: {
+  contactId: string | null;
+  orderNumber: number;
+  total: number;
+  includeAgentPipeline: boolean;
+}) {
+  if (!input.contactId) return null;
+  try {
+    if (input.includeAgentPipeline) {
+      await syncCrmOrderCreatedOpportunities({
+        contactId: input.contactId,
+        orderNumber: input.orderNumber,
+        total: input.total,
+      });
+    } else {
+      await syncCrmProductOpportunityStage({
+        contactId: input.contactId,
+        orderNumber: input.orderNumber,
+        total: input.total,
+        stage: "pedido_realizado",
+      });
+    }
+    return null;
+  } catch (error) {
+    return `El pedido se guardó, pero no se pudieron sincronizar sus oportunidades: ${errorMessage(error)}`;
+  }
 }
 
 function validateCustomer(input: Omit<CreateOrderInput, "items">): string | null {
@@ -353,6 +388,12 @@ export async function createOrder(
     items: resolved.items,
     subtotal: rpcInput.p_subtotal,
   });
+  const opportunityWarning = await syncCreatedOrderOpportunities({
+    contactId: crm.contactId,
+    orderNumber: order.order_number,
+    total: rpcInput.p_subtotal,
+    includeAgentPipeline: true,
+  });
 
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
@@ -364,7 +405,7 @@ export async function createOrder(
     locationName: order.location_name ?? null,
     locationAddress: order.location_address ?? null,
     crmSynced: crm.status === "sincronizado",
-    warning: crm.error ?? noteWarning ?? undefined,
+    warning: joinWarnings(crm.error, noteWarning, opportunityWarning),
   };
 }
 
@@ -406,6 +447,12 @@ export async function createManualOrder(
     items: resolved.items,
     subtotal: rpcInput.p_subtotal,
   });
+  const opportunityWarning = await syncCreatedOrderOpportunities({
+    contactId: crm.contactId,
+    orderNumber: order.order_number,
+    total: rpcInput.p_subtotal,
+    includeAgentPipeline: false,
+  });
 
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
@@ -417,7 +464,7 @@ export async function createManualOrder(
     locationName: location?.name ?? null,
     locationAddress: location?.address ?? null,
     crmSynced: crm.status === "sincronizado",
-    warning: crm.error ?? noteWarning ?? undefined,
+    warning: joinWarnings(crm.error, noteWarning, opportunityWarning),
   };
 }
 
@@ -426,8 +473,58 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
   const { supabase, user } = await requireAdmin();
   if (!user) return { error: "No autorizado." };
 
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
+
   const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
   if (error) return { error: error.message };
+
+  try {
+    let contactId = order.ghl_contact_id as string | null;
+    if (!contactId) {
+      contactId = await upsertCrmContact({
+        name: order.customer_name,
+        email: order.customer_email,
+        phone: order.customer_phone,
+        cedula: order.customer_cedula,
+        address: [order.address, order.address_details].filter(Boolean).join(", ") || null,
+        city: order.city,
+        department: order.department,
+        source: order.order_source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
+      });
+    }
+
+    await syncCrmProductOpportunityStage({
+      contactId,
+      orderNumber: order.order_number,
+      total: Number(order.total),
+      stage: status,
+    });
+    await supabase
+      .from("orders")
+      .update({
+        ghl_contact_id: contactId,
+        ghl_sync_status: "sincronizado",
+        ghl_sync_error: null,
+        ghl_synced_at: new Date().toISOString(),
+      })
+      .eq("id", orderId);
+  } catch (syncError) {
+    const warning = `El estado local cambió, pero el CRM no se pudo sincronizar: ${errorMessage(syncError)}`;
+    await supabase
+      .from("orders")
+      .update({ ghl_sync_status: "error", ghl_sync_error: warning.slice(0, 500) })
+      .eq("id", orderId);
+    revalidatePath("/admin");
+    revalidatePath("/admin/pedidos");
+    revalidatePath(`/admin/pedidos/${orderId}`);
+    return { success: true, warning };
+  }
+
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
   revalidatePath(`/admin/pedidos/${orderId}`);
@@ -466,7 +563,7 @@ export async function sendOrderQuote(orderId: string, message: string) {
   ]);
 
   if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
-  if (!["pendiente_cotizacion", "cotizacion_enviada"].includes(order.status)) {
+  if (!["pedido_realizado", "cotizacion_enviada"].includes(order.status)) {
     return { error: "Solo puedes cotizar pedidos pendientes o reenviar una cotización." };
   }
   if (!items || items.length === 0) return { error: "El pedido no tiene productos para cotizar." };
@@ -525,7 +622,23 @@ export async function sendOrderQuote(orderId: string, message: string) {
           "La cotización fue enviada, pero no se pudo actualizar su estado local. No la reenvíes sin verificar la conversación en el CRM.",
       };
     }
-    return { success: true };
+
+    try {
+      await syncCrmProductOpportunityStage({
+        contactId,
+        orderNumber: order.order_number,
+        total: Number(order.total),
+        stage: "cotizacion_enviada",
+      });
+      return { success: true };
+    } catch (syncError) {
+      const warning = `La cotización fue enviada, pero la oportunidad no cambió de etapa: ${errorMessage(syncError)}`;
+      await supabase
+        .from("orders")
+        .update({ ghl_sync_status: "error", ghl_sync_error: warning.slice(0, 500) })
+        .eq("id", orderId);
+      return { success: true, warning };
+    }
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);
     await supabase

@@ -1,24 +1,26 @@
 export type DeliveryMethod = "domicilio" | "recoger";
 
 export type OrderStatus =
-  | "pendiente_cotizacion"
+  | "pedido_realizado"
   | "cotizacion_enviada"
-  | "confirmado"
-  | "preparando"
-  | "enviado"
-  | "entregado"
-  | "cancelado";
+  | "cotizacion_aceptada"
+  | "cotizacion_no_aceptada"
+  | "no_hubo_producto"
+  | "pedido_listo"
+  | "pedido_enviado"
+  | "pedido_entregado";
 
 export type PaymentStatus = "pendiente" | "pagado";
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  pendiente_cotizacion: "Pendiente por cotizar",
+  pedido_realizado: "Pedido realizado",
   cotizacion_enviada: "Cotización enviada",
-  confirmado: "Confirmado",
-  preparando: "Preparando",
-  enviado: "Enviado",
-  entregado: "Entregado",
-  cancelado: "Cancelado",
+  cotizacion_aceptada: "Cotización aceptada",
+  cotizacion_no_aceptada: "Cotización no aceptada",
+  no_hubo_producto: "No hubo producto",
+  pedido_listo: "Pedido listo",
+  pedido_enviado: "Pedido enviado",
+  pedido_entregado: "Pedido entregado",
 };
 
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {

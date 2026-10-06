@@ -30,7 +30,7 @@ export function OrderDetail({ order }: { order: OrderWithItems }) {
     message: string;
   } | null>(null);
   const crmStatus = CRM_STATUS_COPY[order.ghl_sync_status ?? "pendiente"];
-  const canSendQuote = status === "pendiente_cotizacion" || status === "cotizacion_enviada";
+  const canSendQuote = status === "pedido_realizado" || status === "cotizacion_enviada";
   const smsCost = estimateSmsCost(quoteMessage);
 
   async function handleStatusChange(next: OrderStatus) {
@@ -43,10 +43,15 @@ export function OrderDetail({ order }: { order: OrderWithItems }) {
       toast.error("No se pudo cambiar el estado del pedido", { description: result.error });
       return;
     }
-    setFeedback(null);
-    toast.success("Estado del pedido actualizado", {
-      description: ORDER_STATUS_LABELS[next],
-    });
+    const warning = "warning" in result ? result.warning : undefined;
+    setFeedback(warning ? { kind: "warning", message: warning } : null);
+    if (warning) {
+      toast.warning("Estado local actualizado con advertencias", { description: warning });
+    } else {
+      toast.success("Estado del pedido actualizado", {
+        description: ORDER_STATUS_LABELS[next],
+      });
+    }
     router.refresh();
   }
 
@@ -191,7 +196,7 @@ export function OrderDetail({ order }: { order: OrderWithItems }) {
               </div>
               {!canSendQuote && (
                 <p className="mt-3 text-xs text-slate-500">
-                  Para enviar o reenviar una cotización, cambia el pedido a Pendiente por cotizar o Cotización enviada.
+                  Para enviar o reenviar una cotización, cambia el pedido a Pedido realizado o Cotización enviada.
                 </p>
               )}
               {order.ghl_sync_error && order.ghl_sync_status !== "sincronizado" && (

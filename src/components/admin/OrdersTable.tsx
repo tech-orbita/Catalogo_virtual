@@ -168,13 +168,14 @@ export function OrdersTable({
 }
 
 const STATUS_COLORS: Record<OrderStatus, string> = {
-  pendiente_cotizacion: "bg-amber-50 text-amber-700",
+  pedido_realizado: "bg-amber-50 text-amber-700",
   cotizacion_enviada: "bg-cyan-50 text-cyan-700",
-  confirmado: "bg-blue-50 text-blue-700",
-  preparando: "bg-purple-50 text-purple-700",
-  enviado: "bg-indigo-50 text-indigo-700",
-  entregado: "bg-green-50 text-green-700",
-  cancelado: "bg-red-50 text-red-700",
+  cotizacion_aceptada: "bg-blue-50 text-blue-700",
+  cotizacion_no_aceptada: "bg-rose-50 text-rose-700",
+  no_hubo_producto: "bg-red-50 text-red-700",
+  pedido_listo: "bg-purple-50 text-purple-700",
+  pedido_enviado: "bg-indigo-50 text-indigo-700",
+  pedido_entregado: "bg-green-50 text-green-700",
 };
 
 export function StatusBadge({ status }: { status: OrderStatus }) {

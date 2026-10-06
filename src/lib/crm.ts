@@ -43,6 +43,71 @@ interface CrmMessageResponse {
   conversationId?: string;
 }
 
+interface CrmPipelineStage {
+  id?: string;
+  name?: string;
+}
+
+interface CrmPipeline {
+  id?: string;
+  name?: string;
+  stages?: CrmPipelineStage[];
+}
+
+interface CrmPipelinesResponse {
+  pipelines?: CrmPipeline[];
+}
+
+interface CrmOpportunity {
+  id?: string;
+  name?: string;
+  status?: string;
+  pipelineId?: string;
+  pipelineStageId?: string;
+}
+
+interface CrmOpportunitiesResponse {
+  opportunities?: CrmOpportunity[];
+}
+
+interface CrmOpportunityResponse {
+  opportunity?: CrmOpportunity;
+}
+
+export type CrmOrderStage =
+  | "pedido_realizado"
+  | "cotizacion_enviada"
+  | "cotizacion_aceptada"
+  | "cotizacion_no_aceptada"
+  | "no_hubo_producto"
+  | "pedido_listo"
+  | "pedido_enviado"
+  | "pedido_entregado";
+
+const AGENT_PIPELINE_NAME = "000. Agente IA";
+const AGENT_CATALOG_STAGE_NAME = "Pedido por Catálogo Virtual";
+const PRODUCTS_PIPELINE_NAME = "000. Productos";
+
+const PRODUCT_STAGE_NAMES: Record<CrmOrderStage, string> = {
+  pedido_realizado: "Pedido Realizado",
+  cotizacion_enviada: "Cotización Enviada",
+  cotizacion_aceptada: "Cotización Aceptada",
+  cotizacion_no_aceptada: "Cotización no Aceptada",
+  no_hubo_producto: "No Hubo Producto",
+  pedido_listo: "Pedido Listo",
+  pedido_enviado: "Pedido Enviado",
+  pedido_entregado: "Pedido Entregado",
+};
+
+type ResolvedCrmPipeline = {
+  id: string;
+  stages: Map<string, string>;
+};
+
+let pipelineCache:
+  | { locationId: string; expiresAt: number; pipelines: CrmPipeline[] }
+  | null = null;
+
 function getConfig() {
   const apiKey = readEnv("ORBITA_CRM_API_KEY", "GHL_API_KEY");
   const locationId = readEnv("ORBITA_CRM_LOCATION_ID", "GHL_LOCATION_ID");
@@ -128,6 +193,226 @@ function sanitizeDetail(detail: string): string {
     .replace(/msgsndr(\.com)?/gi, "Órbita IA")
     .replace(/\bghl\b/gi, "CRM")
     .slice(0, 300);
+}
+
+function normalizeCrmName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase("es");
+}
+
+async function getCrmPipelines(): Promise<CrmPipeline[]> {
+  const { locationId } = getConfig();
+  if (pipelineCache?.locationId === locationId && pipelineCache.expiresAt > Date.now()) {
+    return pipelineCache.pipelines;
+  }
+
+  const params = new URLSearchParams({ locationId });
+  const response = await crmRequest<CrmPipelinesResponse>(
+    `/opportunities/pipelines?${params.toString()}`,
+    { method: "GET" }
+  );
+  const pipelines = response.pipelines ?? [];
+  pipelineCache = { locationId, pipelines, expiresAt: Date.now() + 5 * 60_000 };
+  return pipelines;
+}
+
+async function resolveCrmPipeline(
+  pipelineName: string,
+  requiredStageNames: string[]
+): Promise<ResolvedCrmPipeline> {
+  const pipelines = await getCrmPipelines();
+  const pipeline = pipelines.find(
+    (candidate) => normalizeCrmName(candidate.name ?? "") === normalizeCrmName(pipelineName)
+  );
+  if (!pipeline?.id) {
+    throw new Error(`No se encontró el embudo "${pipelineName}" en el CRM.`);
+  }
+
+  const stages = new Map<string, string>();
+  for (const stageName of requiredStageNames) {
+    const stage = pipeline.stages?.find(
+      (candidate) => normalizeCrmName(candidate.name ?? "") === normalizeCrmName(stageName)
+    );
+    if (!stage?.id) {
+      throw new Error(`No se encontró la etapa "${stageName}" en el embudo "${pipelineName}".`);
+    }
+    stages.set(stageName, stage.id);
+  }
+
+  return { id: pipeline.id, stages };
+}
+
+async function searchCrmOpportunities(contactId: string, pipelineId: string) {
+  const { locationId } = getConfig();
+  const params = new URLSearchParams({
+    locationId,
+    contactId,
+    pipelineId,
+    status: "all",
+    limit: "100",
+  });
+  const response = await crmRequest<CrmOpportunitiesResponse>(
+    `/opportunities/search?${params.toString()}`,
+    { method: "GET" }
+  );
+  return response.opportunities ?? [];
+}
+
+async function createCrmOpportunity(input: {
+  contactId: string;
+  pipelineId: string;
+  stageId: string;
+  name: string;
+  monetaryValue?: number;
+}) {
+  const { locationId } = getConfig();
+  const response = await crmRequest<CrmOpportunityResponse>("/opportunities/", {
+    method: "POST",
+    body: JSON.stringify({
+      pipelineId: input.pipelineId,
+      pipelineStageId: input.stageId,
+      locationId,
+      contactId: input.contactId,
+      name: input.name,
+      status: "open",
+      monetaryValue: input.monetaryValue,
+    }),
+  });
+  if (!response.opportunity?.id) {
+    throw new Error("El CRM no confirmó la creación de la oportunidad.");
+  }
+  return response.opportunity.id;
+}
+
+async function updateCrmOpportunity(
+  opportunityId: string,
+  input: { pipelineId: string; stageId: string; name?: string; monetaryValue?: number }
+) {
+  const response = await crmRequest<CrmOpportunityResponse>(
+    `/opportunities/${encodeURIComponent(opportunityId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        pipelineId: input.pipelineId,
+        pipelineStageId: input.stageId,
+        name: input.name,
+        status: "open",
+        monetaryValue: input.monetaryValue,
+      }),
+    }
+  );
+  if (response.opportunity && !response.opportunity.id) {
+    throw new Error("El CRM no confirmó la actualización de la oportunidad.");
+  }
+}
+
+function productOpportunityName(orderNumber: number) {
+  return `Pedido catálogo #${orderNumber}`;
+}
+
+function waitForCrmIndex(delayMs: number) {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function ensureProductOpportunity(input: {
+  contactId: string;
+  orderNumber: number;
+  total: number;
+  stage: CrmOrderStage;
+}) {
+  const stageName = PRODUCT_STAGE_NAMES[input.stage];
+  const pipeline = await resolveCrmPipeline(PRODUCTS_PIPELINE_NAME, [stageName]);
+  const opportunityName = productOpportunityName(input.orderNumber);
+  const opportunities = await searchCrmOpportunities(input.contactId, pipeline.id);
+  const existing =
+    opportunities.find(
+      (opportunity) =>
+        normalizeCrmName(opportunity.name ?? "") === normalizeCrmName(opportunityName)
+    ) ?? opportunities.find((opportunity) => opportunity.status === "open") ?? opportunities[0];
+  const stageId = pipeline.stages.get(stageName)!;
+
+  if (existing?.id) {
+    await updateCrmOpportunity(existing.id, {
+      pipelineId: pipeline.id,
+      stageId,
+      name: opportunityName,
+      monetaryValue: input.total,
+    });
+    return existing.id;
+  }
+
+  try {
+    return await createCrmOpportunity({
+      contactId: input.contactId,
+      pipelineId: pipeline.id,
+      stageId,
+      name: opportunityName,
+      monetaryValue: input.total,
+    });
+  } catch (createError) {
+    // La subcuenta puede bloquear duplicados y el índice de búsqueda tarda un
+    // instante en mostrar una oportunidad recién creada. La recuperamos y la
+    // actualizamos en vez de generar otra.
+    for (const delayMs of [200, 400, 800]) {
+      await waitForCrmIndex(delayMs);
+      const indexed = await searchCrmOpportunities(input.contactId, pipeline.id);
+      const recovered =
+        indexed.find(
+          (opportunity) =>
+            normalizeCrmName(opportunity.name ?? "") === normalizeCrmName(opportunityName)
+        ) ?? indexed.find((opportunity) => opportunity.status === "open") ?? indexed[0];
+      if (recovered?.id) {
+        await updateCrmOpportunity(recovered.id, {
+          pipelineId: pipeline.id,
+          stageId,
+          name: opportunityName,
+          monetaryValue: input.total,
+        });
+        return recovered.id;
+      }
+    }
+    throw createError;
+  }
+}
+
+export async function syncCrmOrderCreatedOpportunities(input: {
+  contactId: string;
+  orderNumber: number;
+  total: number;
+}) {
+  const agentPipeline = await resolveCrmPipeline(AGENT_PIPELINE_NAME, [AGENT_CATALOG_STAGE_NAME]);
+  const agentOpportunities = await searchCrmOpportunities(input.contactId, agentPipeline.id);
+  const activeAgentOpportunity =
+    agentOpportunities.find((opportunity) => opportunity.status === "open") ?? agentOpportunities[0];
+  const agentStageId = agentPipeline.stages.get(AGENT_CATALOG_STAGE_NAME)!;
+
+  if (activeAgentOpportunity?.id) {
+    await updateCrmOpportunity(activeAgentOpportunity.id, {
+      pipelineId: agentPipeline.id,
+      stageId: agentStageId,
+    });
+  } else {
+    await createCrmOpportunity({
+      contactId: input.contactId,
+      pipelineId: agentPipeline.id,
+      stageId: agentStageId,
+      name: "Pedido por catálogo virtual",
+    });
+  }
+
+  await ensureProductOpportunity({ ...input, stage: "pedido_realizado" });
+}
+
+export async function syncCrmProductOpportunityStage(input: {
+  contactId: string;
+  orderNumber: number;
+  total: number;
+  stage: CrmOrderStage;
+}) {
+  await ensureProductOpportunity(input);
 }
 
 export async function upsertCrmContact(input: CrmContactInput): Promise<string> {
