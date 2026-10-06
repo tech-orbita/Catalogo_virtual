@@ -28,7 +28,7 @@ export default function AdminLoginPage() {
       <div className="grid min-h-[100dvh] lg:grid-cols-[1.08fr_0.92fr]">
         <section className="relative hidden overflow-hidden px-10 py-10 lg:flex lg:flex-col lg:justify-between xl:px-16">
           <div className="absolute -left-32 top-1/3 h-80 w-80 rounded-full bg-orbita-cyan/15 blur-3xl" />
-          <div className="absolute -right-24 bottom-0 h-96 w-96 rounded-full bg-brand/20 blur-3xl" />
+          <div className="absolute -right-24 bottom-0 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
 
           <div className="relative max-w-xl pb-12">
             <p className="mb-5 text-sm font-medium uppercase tracking-[0.2em] text-orbita-cyan">
@@ -53,7 +53,7 @@ export default function AdminLoginPage() {
           <p className="relative text-xs text-white/35">Tecnología operativa por Órbita IA</p>
         </section>
 
-        <section className="relative flex min-h-[100dvh] items-center justify-center bg-[#fff8fa] px-5 py-10 sm:px-8">
+        <section className="relative flex min-h-[100dvh] items-center justify-center bg-[#f5f8fa] px-5 py-10 sm:px-8">
           <div className="admin-enter w-full max-w-md">
             <div className="mb-8">
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-orbita-cyan-soft text-orbita-cyan-dark">

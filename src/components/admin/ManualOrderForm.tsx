@@ -358,7 +358,7 @@ export function ManualOrderForm({
           <button
             type="submit"
             disabled={submitting || catalogOptions.length === 0}
-            className="mt-5 min-h-12 w-full rounded-xl bg-orbita-cyan px-4 py-3 text-sm font-semibold text-orbita-navy transition hover:bg-[#ffb6c1] disabled:cursor-wait disabled:opacity-60"
+            className="mt-5 min-h-12 w-full rounded-xl bg-orbita-cyan px-4 py-3 text-sm font-semibold text-orbita-navy transition hover:bg-[#78c5d7] disabled:cursor-wait disabled:opacity-60"
           >
             {submitting ? "Creando pedido..." : "Crear pedido manual"}
           </button>

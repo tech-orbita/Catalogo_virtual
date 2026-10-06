@@ -30,5 +30,5 @@ export function ModalPortal({ children }: { children: React.ReactNode }) {
   }, []);
 
   if (!isClient) return null;
-  return createPortal(children, document.body);
+  return createPortal(<div className="admin-shell">{children}</div>, document.body);
 }

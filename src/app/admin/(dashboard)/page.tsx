@@ -96,7 +96,7 @@ export default async function AdminHomePage() {
         actions={
           <Link
             href="/admin/productos"
-            className="hidden min-h-10 items-center gap-2 rounded-xl bg-orbita-cyan px-4 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#ffb6c1] sm:flex"
+            className="hidden min-h-10 items-center gap-2 rounded-xl bg-orbita-cyan px-4 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#78c5d7] sm:flex"
           >
             <Plus size={17} />
             Producto

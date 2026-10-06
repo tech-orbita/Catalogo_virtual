@@ -11,14 +11,14 @@
   --border: #cacaca;
   --surface-muted: #f7f7f7;
   --storefront-canvas: #fff8fa;
-  --admin-bg: #545454;
-  --admin-bg-active: #3f3f3f;
-  --orbita-navy: #545454;
-  --orbita-navy-soft: #3f3f3f;
-  --orbita-cyan: #ff4081;
-  --orbita-cyan-dark: #d6336c;
-  --orbita-cyan-soft: #fff0f3;
-  --orbita-canvas: #f7f7f7;
+  --admin-bg: #16181c;
+  --admin-bg-active: #22262c;
+  --orbita-navy: #031b2d;
+  --orbita-navy-soft: #0b2b42;
+  --orbita-cyan: #63b7cc;
+  --orbita-cyan-dark: #3f97ae;
+  --orbita-cyan-soft: #e7f5f8;
+  --orbita-canvas: #f3f6f9;
 }
 
 @theme inline {
@@ -52,7 +52,7 @@ body {
 
 .admin-shell {
   --brand: var(--orbita-cyan-dark);
-  --brand-dark: #ad2756;
+  --brand-dark: #287b91;
   --brand-light: var(--orbita-cyan-soft);
 }
 
@@ -61,6 +61,11 @@ body {
   --brand: #d6336c;
   --brand-dark: #ad2756;
   --brand-light: #fff0f3;
+  --orbita-navy: #545454;
+  --orbita-navy-soft: #3f3f3f;
+  --orbita-cyan: #ff4081;
+  --orbita-cyan-dark: #d6336c;
+  --orbita-cyan-soft: #fff0f3;
   color: #545454;
 }
 

@@ -315,7 +315,7 @@ export function CategoryDetailManager({
           <button
             type="button"
             onClick={() => setModalCategory("new")}
-            className="flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-orbita-cyan px-4 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#ffb6c1]"
+            className="flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-orbita-cyan px-4 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#78c5d7]"
           >
             <Plus size={17} aria-hidden="true" />
             Nueva subcategoría

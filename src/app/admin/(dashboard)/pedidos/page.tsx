@@ -25,7 +25,7 @@ export default async function PedidosPage({
         actions={
           <Link
             href="/admin/pedidos/nuevo"
-            className="flex min-h-10 items-center gap-2 rounded-xl bg-orbita-cyan px-3 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#ffb6c1] sm:px-4"
+            className="flex min-h-10 items-center gap-2 rounded-xl bg-orbita-cyan px-3 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-[#78c5d7] sm:px-4"
           >
             <Plus size={16} />
             <span className="hidden sm:inline">Crear pedido</span>
