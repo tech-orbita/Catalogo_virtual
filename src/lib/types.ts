@@ -132,11 +132,24 @@ export interface Order {
   ghl_sync_error?: string | null;
   ghl_synced_at?: string | null;
   quote_message?: string | null;
+  quote_items?: OrderQuoteItem[] | null;
+  quote_delivery_fee?: number | null;
   quote_sent_at?: string | null;
   quote_sent_by_email?: string | null;
   ghl_message_id?: string | null;
   ghl_conversation_id?: string | null;
   created_at: string;
+}
+
+export interface OrderQuoteItem {
+  product_id: string;
+  variant_id: string | null;
+  product_name: string;
+  variant_label: string | null;
+  quantity: number;
+  unit_price: number;
+  subtotal: number;
+  available: boolean;
 }
 
 export interface OrderItem {

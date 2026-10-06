@@ -74,9 +74,9 @@ codex mcp list
 
 La autenticación abre OAuth en el navegador. No requiere guardar un PAT en el repositorio. Los scopes compatibles con Supabase están declarados en la configuración y las herramientas de escritura quedan configuradas para pedir aprobación.
 
-## 6. Sincronización de contactos y cotizaciones por SMS
+## 6. Sincronización de contactos y cotizaciones mediante workflow
 
-El checkout y la creación manual de pedidos sincronizan el cliente con la subcuenta del CRM al guardar la solicitud. El pedido completo también se agrega como nota del contacto. El botón `Enviar cotización` envía un SMS a través del proveedor externo configurado en la subcuenta; no abre ningún enlace ni expone el token al navegador.
+El checkout y la creación manual de pedidos sincronizan el cliente con la subcuenta del CRM al guardar la solicitud. El pedido completo también se agrega como nota del contacto. El botón `Enviar cotización` actualiza un campo multiline del contacto y lo inscribe en un workflow; la aplicación no crea el mensaje ni elige proveedor o número remitente.
 
 Configura estas variables en el entorno del servidor:
 
@@ -85,21 +85,23 @@ ORBITA_CRM_API_KEY=pit-REEMPLAZAR
 ORBITA_CRM_LOCATION_ID=REEMPLAZAR_ID_SUBCUENTA
 ORBITA_CRM_DEFAULT_PHONE_COUNTRY_CODE=57
 ORBITA_CRM_CONTACT_COUNTRY=CO
-ORBITA_CRM_MESSAGE_TYPE=Custom
-ORBITA_CRM_CONVERSATION_PROVIDER_ID=REEMPLAZAR_ID_PROVEEDOR
+ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY=resumen_de_cotizacion
+ORBITA_CRM_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY=productos_no_disponibles
+ORBITA_CRM_QUOTE_WORKFLOW_ID=REEMPLAZAR_ID_WORKFLOW
 ```
 
-El Private Integration Token debe pertenecer a la subcuenta y tener, como mínimo, los scopes `contacts.write` y `conversations/message.write`. Si deseas guardar la cédula como un campo visible independiente, crea el custom field en el CRM y agrega su id como `ORBITA_CRM_CEDULA_CUSTOM_FIELD_ID`; de todas formas, la cédula y el resto del pedido quedan incluidos en la nota.
+El Private Integration Token debe pertenecer a la subcuenta y tener `contacts.write`, además de los permisos de oportunidades que ya usa el panel. Ya no necesita `conversations/message.write` para cotizar. Si deseas guardar la cédula como un campo visible independiente, crea el custom field en el CRM y agrega su id como `ORBITA_CRM_CEDULA_CUSTOM_FIELD_ID`; de todas formas, la cédula y el resto del pedido quedan incluidos en la nota.
 
-### Canal de envío
+### Workflow y canal de salida
 
-La cotización sale por SMS, no por WhatsApp. Hay dos formas de enrutarla y dependen de cómo quedó dado de alta tu proveedor externo:
+La app ejecuta solamente estas operaciones:
 
-- **Proveedor adicional** (convive con el SMS nativo): deja `ORBITA_CRM_MESSAGE_TYPE=Custom` y define `ORBITA_CRM_CONVERSATION_PROVIDER_ID` con el id que genera el proveedor al crearlo en el marketplace. Sin ese id la aplicación no envía y marca el pedido como CRM sin configurar, en vez de mandar el mensaje por el canal equivocado.
-- **Proveedor predeterminado** (reemplaza al SMS nativo en Settings > Phone Numbers > Advanced Settings > SMS Provider): define `ORBITA_CRM_MESSAGE_TYPE=SMS` y deja vacío el id del proveedor.
+1. Actualiza por key el resumen y la selección de productos no disponibles en el contacto.
+2. Inscribe el contacto en `ORBITA_CRM_QUOTE_WORKFLOW_ID`.
+3. El workflow envía un mensaje normal por goGHL.ai cuyo contenido empieza por `#btn`; el proveedor lo transforma en un mensaje interactivo.
 
-El número remitente lo decide siempre el proveedor; la aplicación no lo envía. Sin `ORBITA_CRM_LOCATION_ID` el pedido se guarda igual, pero queda marcado como CRM sin configurar.
+El número remitente, el proveedor y los botones no se envían por la API de conversaciones. Sin las keys de los campos y el ID del workflow, el pedido no cambia a cotización enviada.
 
-El texto de la cotización se arma en texto plano, sin viñetas ni `*negrita*`, porque en SMS esos caracteres se ven literales y los que salen de GSM-7 obligan a codificar en UCS-2 (el segmento baja de 153 a 67 caracteres). El panel muestra el conteo de segmentos junto al cuadro de texto.
+La configuración exacta del workflow, la sintaxis de goGHL.ai y las ramas de aprobación/rechazo está en `docs/ghl-quote-workflow.md`.
 
-Antes de operar en producción, aplica la migración `supabase/migrations/0006_orders_quotes_ghl.sql`, vuelve a desplegar las variables y prueba con un contacto autorizado. Un estado HTTP exitoso confirma que el CRM aceptó el mensaje; la entrega final depende del proveedor de SMS y de sus propias reglas.
+Antes de operar en producción, aplica también `supabase/migrations/20261006172937_order_quote_builder.sql`, vuelve a desplegar las variables y prueba con un contacto autorizado. Una activación exitosa confirma que GHL aceptó el contacto en el workflow; no confirma que goGHL.ai haya entregado el mensaje.

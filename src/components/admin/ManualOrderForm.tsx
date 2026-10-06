@@ -348,7 +348,7 @@ export function ManualOrderForm({
           <p className="text-xs font-medium uppercase tracking-[0.16em] text-orbita-cyan">Total estimado</p>
           <p className="mt-2 text-3xl font-semibold tracking-[-0.04em]">{formatCOP(total)}</p>
           <p className="mt-3 text-xs leading-5 text-white/50">
-            El pedido quedará en Pendiente por cotizar antes de enviar la cotización por SMS.
+            El pedido quedará pendiente para que prepares la cotización desde su detalle.
           </p>
           {error && (
             <p role="alert" className="mt-4 rounded-xl bg-red-500/15 px-3 py-2.5 text-sm text-red-100">

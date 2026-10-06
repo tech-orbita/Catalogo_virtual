@@ -6,17 +6,18 @@ import { normalizeCatalogName } from "@/lib/catalog-name";
 import {
   createCrmContactNote,
   CrmConfigurationError,
-  sendCrmQuoteMessage,
   syncCrmOrderCreatedOpportunities,
   syncCrmProductOpportunityStage,
+  triggerCrmQuoteWorkflow,
   upsertCrmContact,
 } from "@/lib/crm";
-import { buildOrderCrmNote, SMS_MAX_LENGTH } from "@/lib/messaging";
+import { buildOrderCrmNote, buildStructuredQuoteMessage, QUOTE_SUMMARY_MAX_LENGTH } from "@/lib/messaging";
 import {
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
   type CartItem,
   type DeliveryMethod,
+  type OrderQuoteItem,
   type OrderStatus,
   type PaymentStatus,
 } from "@/lib/types";
@@ -45,6 +46,15 @@ export interface ManualOrderItemInput {
 
 export interface CreateManualOrderInput extends Omit<CreateOrderInput, "items"> {
   items: ManualOrderItemInput[];
+}
+
+export interface QuoteOrderItemInput extends ManualOrderItemInput {
+  available: boolean;
+}
+
+export interface TriggerOrderQuoteWorkflowInput {
+  items: QuoteOrderItemInput[];
+  deliveryFee: number;
 }
 
 export interface CreateOrderResult {
@@ -545,28 +555,55 @@ export async function updatePaymentStatus(orderId: string, paymentStatus: Paymen
   return { success: true };
 }
 
-export async function sendOrderQuote(orderId: string, message: string) {
-  const trimmedMessage = message.trim();
-  if (!trimmedMessage) return { error: "Escribe el mensaje de la cotización." };
-  if (trimmedMessage.length > SMS_MAX_LENGTH) {
-    return {
-      error: `El mensaje de la cotización no puede superar ${SMS_MAX_LENGTH} caracteres.`,
-    };
-  }
-
+export async function triggerOrderQuoteWorkflow(
+  orderId: string,
+  input: TriggerOrderQuoteWorkflowInput
+) {
   const { supabase, user } = await requireAdmin();
   if (!user) return { error: "No autorizado." };
 
-  const [{ data: order, error: orderError }, { data: items }] = await Promise.all([
-    supabase.from("orders").select("*").eq("id", orderId).maybeSingle(),
-    supabase.from("order_items").select("*").eq("order_id", orderId),
-  ]);
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
 
   if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
-  if (!["pedido_realizado", "cotizacion_enviada"].includes(order.status)) {
+  if (!["pedido_realizado", "cotizacion_enviada", "no_hubo_producto"].includes(order.status)) {
     return { error: "Solo puedes cotizar pedidos pendientes o reenviar una cotización." };
   }
-  if (!items || items.length === 0) return { error: "El pedido no tiene productos para cotizar." };
+
+  const resolved = await resolveItems(input.items, true);
+  if ("error" in resolved) return resolved;
+
+  const requestedDeliveryFee = Number(input.deliveryFee);
+  if (!Number.isFinite(requestedDeliveryFee) || requestedDeliveryFee < 0 || requestedDeliveryFee > 100_000_000) {
+    return { error: "El costo del domicilio no es válido." };
+  }
+  const deliveryFee = order.delivery_method === "domicilio" ? requestedDeliveryFee : 0;
+  const quoteItems: OrderQuoteItem[] = resolved.items.map((item, index) => ({
+    product_id: item.productId,
+    variant_id: item.variantId,
+    product_name: item.productName,
+    variant_label: item.variantLabel,
+    quantity: item.quantity,
+    unit_price: item.unitPrice,
+    subtotal: item.subtotal,
+    available: input.items[index]?.available !== false,
+  }));
+  const availableItems = quoteItems.filter((item) => item.available);
+  const unavailableProducts = [
+    ...new Set(quoteItems.filter((item) => !item.available).map((item) => item.product_name)),
+  ];
+  const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const total = subtotal + deliveryFee;
+  const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee);
+  if (quoteSummary.length > QUOTE_SUMMARY_MAX_LENGTH) {
+    return {
+      error: "La cotización es demasiado extensa. Reduce la cantidad de productos o simplifica las variantes.",
+    };
+  }
+  const nextStatus: OrderStatus = availableItems.length > 0 ? "cotizacion_enviada" : "no_hubo_producto";
 
   let contactId: string;
   try {
@@ -590,24 +627,28 @@ export async function sendOrderQuote(orderId: string, message: string) {
       })
       .eq("id", orderId);
     revalidatePath(`/admin/pedidos/${orderId}`);
-    return { error: message };
+    return { error: "No se pudo preparar el contacto para enviar la cotización." };
   }
 
   try {
-    const sent = await sendCrmQuoteMessage(contactId, trimmedMessage);
+    await triggerCrmQuoteWorkflow(contactId, quoteSummary, unavailableProducts);
     const { error: updateError } = await supabase
       .from("orders")
       .update({
-        status: "cotizacion_enviada",
-        quote_message: trimmedMessage,
+        status: nextStatus,
+        quote_message: quoteSummary,
+        quote_items: quoteItems,
+        quote_delivery_fee: deliveryFee,
+        subtotal,
+        total,
         quote_sent_at: new Date().toISOString(),
         quote_sent_by_email: user.email ?? null,
         ghl_contact_id: contactId,
         ghl_sync_status: "sincronizado",
         ghl_sync_error: null,
         ghl_synced_at: new Date().toISOString(),
-        ghl_message_id: sent.messageId,
-        ghl_conversation_id: sent.conversationId,
+        ghl_message_id: null,
+        ghl_conversation_id: null,
       })
       .eq("id", orderId);
 
@@ -618,8 +659,9 @@ export async function sendOrderQuote(orderId: string, message: string) {
     if (updateError) {
       return {
         success: true,
+        status: nextStatus,
         warning:
-          "La cotización fue enviada, pero no se pudo actualizar su estado local. No la reenvíes sin verificar la conversación en el CRM.",
+          "La cotización fue preparada, pero su estado local necesita revisión antes de reenviarla.",
       };
     }
 
@@ -627,17 +669,17 @@ export async function sendOrderQuote(orderId: string, message: string) {
       await syncCrmProductOpportunityStage({
         contactId,
         orderNumber: order.order_number,
-        total: Number(order.total),
-        stage: "cotizacion_enviada",
+        total,
+        stage: nextStatus,
       });
-      return { success: true };
+      return { success: true, status: nextStatus };
     } catch (syncError) {
-      const warning = `La cotización fue enviada, pero la oportunidad no cambió de etapa: ${errorMessage(syncError)}`;
+      const technicalWarning = `La cotización fue preparada, pero la oportunidad no cambió de etapa: ${errorMessage(syncError)}`;
       await supabase
         .from("orders")
-        .update({ ghl_sync_status: "error", ghl_sync_error: warning.slice(0, 500) })
+        .update({ ghl_sync_status: "error", ghl_sync_error: technicalWarning.slice(0, 500) })
         .eq("id", orderId);
-      return { success: true, warning };
+      return { success: true, status: nextStatus, warning: "La cotización quedó preparada, pero su estado externo necesita revisión." };
     }
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);
@@ -646,6 +688,6 @@ export async function sendOrderQuote(orderId: string, message: string) {
       .update({ ghl_contact_id: contactId, ghl_sync_status: "error", ghl_sync_error: message })
       .eq("id", orderId);
     revalidatePath(`/admin/pedidos/${orderId}`);
-    return { error: message };
+    return { error: "No se pudo enviar la cotización. Revisa la configuración del canal." };
   }
 }

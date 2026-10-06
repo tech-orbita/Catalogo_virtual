@@ -38,9 +38,14 @@ interface CrmNoteResponse {
   note?: { id?: string };
 }
 
-interface CrmMessageResponse {
-  messageId?: string;
-  conversationId?: string;
+interface CrmContactUpdateResponse {
+  succeeded?: boolean;
+  contact?: { id?: string };
+}
+
+interface CrmWorkflowEnrollmentResponse {
+  succeeded?: boolean;
+  succeded?: boolean;
 }
 
 interface CrmPipelineStage {
@@ -462,54 +467,57 @@ export async function createCrmContactNote(contactId: string, title: string, bod
   return response.note?.id ?? null;
 }
 
-/**
- * Tipo de canal con el que sale la cotización. `Custom` enruta el mensaje al
- * proveedor externo de SMS; `SMS` usa el proveedor que la subcuenta tenga
- * marcado como predeterminado. El número remitente siempre lo decide el
- * proveedor, por eso aquí no se envía `fromNumber`.
- */
-type CrmMessageType = "Custom" | "SMS";
-
-function getMessageChannel(): { type: CrmMessageType; conversationProviderId?: string } {
-  const configured = readEnv("ORBITA_CRM_MESSAGE_TYPE", "GHL_MESSAGE_TYPE");
-  const type: CrmMessageType = configured?.toLowerCase() === "sms" ? "SMS" : "Custom";
-  const conversationProviderId = readEnv(
-    "ORBITA_CRM_CONVERSATION_PROVIDER_ID",
-    "GHL_CONVERSATION_PROVIDER_ID"
+function getQuoteWorkflowConfig() {
+  const quoteFieldKey = readEnv(
+    "ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY",
+    "GHL_QUOTE_CUSTOM_FIELD_KEY"
   );
+  const unavailableProductsFieldKey = readEnv(
+    "ORBITA_CRM_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY",
+    "GHL_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY"
+  );
+  const workflowId = readEnv("ORBITA_CRM_QUOTE_WORKFLOW_ID", "GHL_QUOTE_WORKFLOW_ID");
 
-  // Un proveedor adicional (no el predeterminado) solo recibe el mensaje si se
-  // indica su id; sin él la cotización se enviaría por el canal equivocado.
-  if (type === "Custom" && !conversationProviderId) {
+  if (!quoteFieldKey || !unavailableProductsFieldKey || !workflowId) {
     throw new CrmConfigurationError(
-      "Configura ORBITA_CRM_CONVERSATION_PROVIDER_ID con el id del proveedor de SMS, " +
-        "o define ORBITA_CRM_MESSAGE_TYPE=SMS si ese proveedor ya es el predeterminado de la subcuenta."
+      "Configura las keys de los campos de cotización y productos no disponibles, además del workflow de cotización."
     );
   }
 
-  return { type, conversationProviderId };
+  return { quoteFieldKey, unavailableProductsFieldKey, workflowId };
 }
 
-export async function sendCrmQuoteMessage(contactId: string, message: string) {
-  const { type, conversationProviderId } = getMessageChannel();
+export async function triggerCrmQuoteWorkflow(
+  contactId: string,
+  quoteSummary: string,
+  unavailableProducts: string[]
+) {
+  const { quoteFieldKey, unavailableProductsFieldKey, workflowId } = getQuoteWorkflowConfig();
+  const encodedContactId = encodeURIComponent(contactId);
 
-  const response = await crmRequest<CrmMessageResponse>("/conversations/messages", {
-    method: "POST",
+  const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {
+    method: "PUT",
     body: JSON.stringify({
-      type,
-      contactId,
-      message,
-      status: "pending",
-      conversationProviderId: conversationProviderId || undefined,
+      customFields: [
+        { key: quoteFieldKey, fieldValue: quoteSummary },
+        { key: unavailableProductsFieldKey, fieldValue: unavailableProducts },
+      ],
     }),
   });
 
-  if (!response.messageId) {
-    throw new Error("El CRM no confirmó la creación del mensaje.");
+  if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
+    throw new Error("El CRM no confirmó la actualización del resumen de la cotización.");
   }
 
-  return {
-    messageId: response.messageId,
-    conversationId: response.conversationId ?? null,
-  };
+  const enrolled = await crmRequest<CrmWorkflowEnrollmentResponse>(
+    `/contacts/${encodedContactId}/workflow/${encodeURIComponent(workflowId)}`,
+    {
+    method: "POST",
+      body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
+    }
+  );
+
+  if (enrolled.succeeded !== true && enrolled.succeded !== true) {
+    throw new Error("El CRM no confirmó la activación del workflow de cotización.");
+  }
 }

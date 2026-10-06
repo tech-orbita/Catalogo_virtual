@@ -98,7 +98,7 @@ export function CheckoutForm({
         </div>
         <h1 className="text-xl font-semibold">¡Pedido #{confirmation.orderNumber} recibido!</h1>
         <p className="mt-2 text-sm text-[#545454]/65">
-          Quedó pendiente por cotizar. Un asesor revisará los artículos y te enviará la cotización por SMS.
+          Quedó pendiente por cotizar. Un asesor revisará los artículos y te enviará la cotización.
         </p>
         {confirmation.locationName && (
           <p className="mt-2 rounded-full bg-orbita-cyan-soft px-3 py-1 text-xs font-semibold text-orbita-navy">

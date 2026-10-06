@@ -1,5 +1,5 @@
 import { formatCOP } from "@/lib/currency";
-import type { DeliveryMethod, OrderWithItems } from "@/lib/types";
+import type { DeliveryMethod, OrderQuoteItem, OrderWithItems } from "@/lib/types";
 
 /**
  * Caracteres representables en GSM-7. Cualquier otro (á, í, ó, ú, ¿, …) obliga
@@ -18,6 +18,7 @@ const GSM7_EXTENDED = "^{}\\[~]|€";
  * 1600 deja margen para textos sin acentos y sigue siendo un limite sensato.
  */
 export const SMS_MAX_LENGTH = 1600;
+export const QUOTE_SUMMARY_MAX_LENGTH = 1600;
 
 export interface SmsCost {
   characters: number;
@@ -63,6 +64,65 @@ export function buildQuoteMessage(order: OrderWithItems): string {
 
   lines.push(`Total: ${formatCOP(order.total)}`);
   lines.push("Responde este mensaje si deseas continuar.");
+  return lines.join("\n");
+}
+
+export function buildStructuredQuoteMessage(
+  order: Pick<
+    OrderWithItems,
+    | "order_number"
+    | "customer_name"
+    | "customer_phone"
+    | "customer_cedula"
+    | "customer_email"
+    | "delivery_method"
+    | "address"
+    | "address_details"
+    | "city"
+    | "department"
+    | "location_name_snapshot"
+  >,
+  items: OrderQuoteItem[],
+  deliveryFee: number
+): string {
+  const availableItems = items.filter((item) => item.available);
+  const unavailableItems = items.filter((item) => !item.available);
+  const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
+  const total = subtotal + deliveryFee;
+  const lines = [
+    `Cotización solicitud #${order.order_number}`,
+    `Cliente: ${order.customer_name}`,
+    `Teléfono: ${order.customer_phone}`,
+    `Cédula: ${order.customer_cedula}`,
+  ];
+
+  if (order.customer_email) lines.push(`Correo: ${order.customer_email}`);
+  lines.push("", `Entrega: ${order.delivery_method === "domicilio" ? "Domicilio" : "Recoger en tienda"}`);
+  if (order.location_name_snapshot) lines.push(`Sede: ${order.location_name_snapshot}`);
+  if (order.address) lines.push(`Dirección: ${order.address}`);
+  if (order.address_details) lines.push(`Detalles: ${order.address_details}`);
+  if (order.city || order.department) lines.push(`Ciudad: ${[order.city, order.department].filter(Boolean).join(", ")}`);
+
+  if (availableItems.length > 0) {
+    lines.push("", "Productos disponibles:");
+    for (const item of availableItems) {
+      const label = item.variant_label ? `${item.product_name} (${item.variant_label})` : item.product_name;
+      lines.push(`- ${label} · ${item.quantity} x ${formatCOP(item.unit_price)} = ${formatCOP(item.subtotal)}`);
+    }
+  }
+
+  if (unavailableItems.length > 0) {
+    lines.push("", "Productos no disponibles:");
+    for (const item of unavailableItems) {
+      const label = item.variant_label ? `${item.product_name} (${item.variant_label})` : item.product_name;
+      lines.push(`- ${label}`);
+    }
+  }
+
+  lines.push("", `Subtotal productos: ${formatCOP(subtotal)}`);
+  if (order.delivery_method === "domicilio") lines.push(`Domicilio: ${formatCOP(deliveryFee)}`);
+  lines.push(`Total: ${formatCOP(total)}`);
+  lines.push("Si no ves los botones, responde APROBAR o RECHAZAR.");
   return lines.join("\n");
 }
 
