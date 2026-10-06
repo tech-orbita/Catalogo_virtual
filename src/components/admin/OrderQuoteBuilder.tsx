@@ -179,11 +179,12 @@ export function OrderQuoteBuilder({
       });
 
       if ("error" in result) {
-        setFeedback({ kind: "error", message: result.error });
+        const failureMessage = result.error ?? "No se pudo enviar la cotización.";
+        setFeedback({ kind: "error", message: failureMessage });
         toast.update(toastId, {
           variant: "error",
           title: "No se pudo enviar la cotización",
-          description: result.error,
+          description: failureMessage,
         });
         return;
       }
