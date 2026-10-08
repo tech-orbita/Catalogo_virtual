@@ -1,4 +1,4 @@
-import type { CategoryWithChildren } from "@/lib/types";
+import type { CategoryWithChildren, ProductWithRelations } from "@/lib/types";
 
 interface CatalogProductSortItem {
   id: string;
@@ -14,6 +14,41 @@ const catalogNameCollator = new Intl.Collator("es-CO", {
   numeric: true,
   sensitivity: "base",
 });
+
+function normalizeSearchValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .trim();
+}
+
+export function filterStorefrontProducts(
+  products: ProductWithRelations[],
+  search: string
+): ProductWithRelations[] {
+  const searchTerms = normalizeSearchValue(search).split(/\s+/).filter(Boolean);
+  if (searchTerms.length === 0) return products;
+
+  return products.filter((product) => {
+    const searchableText = normalizeSearchValue(
+      [
+        product.name,
+        product.sku,
+        product.description,
+        ...product.variants.flatMap((variant) => [
+          variant.variant_name,
+          variant.option_value,
+          variant.sku,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+    );
+
+    return searchTerms.every((term) => searchableText.includes(term));
+  });
+}
 
 export function getVisibleStorefrontCategories(
   categories: CategoryWithChildren[]
