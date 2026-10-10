@@ -2,6 +2,17 @@ import "server-only";
 
 const CRM_API_BASE_URL = "https://services.leadconnectorhq.com";
 const CRM_API_VERSION = "v3";
+const CRM_WORKFLOW_IDS = {
+  quote: "f60ba650-14ca-451d-87c4-6b3ab6eeb311",
+  storeNotification: "650f1434-4e4c-4c56-a25f-0abb01bf5e4a",
+  customerNotification: "7280e96d-7915-4dc4-9cc7-e9ee4034790c",
+} as const;
+const CRM_MESSAGE_FIELD_KEYS = {
+  quote: "resumen_de_cotizacion",
+  unavailableProducts: "productos_no_disponibles",
+  customerNotification: "confirmacion_nuevo_pedido",
+  storeNotification: "notificacion_nuevo_pedido",
+} as const;
 
 /**
  * Marca blanca: la app nunca nombra al proveedor del CRM. Las variables de
@@ -27,6 +38,8 @@ export interface CrmContactInput {
   address?: string | null;
   city?: string | null;
   department?: string | null;
+  countryCode?: string | null;
+  countryCallingCode?: string | null;
   source: string;
 }
 
@@ -135,7 +148,7 @@ function splitName(fullName: string) {
   };
 }
 
-export function normalizePhoneForCrm(phone: string): string {
+export function normalizePhoneForCrm(phone: string, countryCallingCode?: string | null): string {
   const trimmed = phone.trim();
   let digits = trimmed.replace(/\D/g, "");
   if (digits.startsWith("00")) digits = digits.slice(2);
@@ -143,10 +156,13 @@ export function normalizePhoneForCrm(phone: string): string {
   if (!digits) return "";
   if (trimmed.startsWith("+") || phone.trim().startsWith("00")) return `+${digits}`;
 
-  const defaultCountryCode = (
-    readEnv("ORBITA_CRM_DEFAULT_PHONE_COUNTRY_CODE", "GHL_DEFAULT_PHONE_COUNTRY_CODE") ?? "57"
-  ).replace(/\D/g, "");
-  if (digits.length === 10 && defaultCountryCode) return `+${defaultCountryCode}${digits}`;
+  const defaultCountryCode = (countryCallingCode ??
+    readEnv("ORBITA_CRM_DEFAULT_PHONE_COUNTRY_CODE", "GHL_DEFAULT_PHONE_COUNTRY_CODE") ??
+    "57").replace(/\D/g, "");
+  if (defaultCountryCode && digits.startsWith(defaultCountryCode) && digits.length >= defaultCountryCode.length + 7) {
+    return `+${digits}`;
+  }
+  if (defaultCountryCode) return `+${defaultCountryCode}${digits}`;
   return `+${digits}`;
 }
 
@@ -423,7 +439,7 @@ export async function syncCrmProductOpportunityStage(input: {
 
 export async function upsertCrmContact(input: CrmContactInput): Promise<string> {
   const { locationId } = getConfig();
-  const phone = normalizePhoneForCrm(input.phone);
+  const phone = normalizePhoneForCrm(input.phone, input.countryCallingCode);
   if (!phone) throw new Error("El teléfono no es válido para sincronizarlo con el CRM.");
 
   const { firstName, lastName } = splitName(input.name);
@@ -433,27 +449,48 @@ export async function upsertCrmContact(input: CrmContactInput): Promise<string> 
     customFields.push({ id: cedulaFieldId, fieldValue: input.cedula });
   }
 
+  const contactFields = {
+    name: input.name.trim(),
+    firstName,
+    lastName,
+    phone,
+    address1: input.address?.trim() || undefined,
+    city: input.city?.trim() || undefined,
+    state: input.department?.trim() || undefined,
+    country:
+      input.countryCode?.trim().toUpperCase() ||
+      readEnv("ORBITA_CRM_CONTACT_COUNTRY", "GHL_CONTACT_COUNTRY") ||
+      "CO",
+    source: input.source,
+    customFields: customFields.length > 0 ? customFields : undefined,
+  };
   const response = await crmRequest<CrmContactResponse>("/contacts/upsert", {
     method: "POST",
     body: JSON.stringify({
       locationId,
-      name: input.name.trim(),
-      firstName,
-      lastName,
-      phone,
-      email: input.email?.trim() || undefined,
-      address1: input.address?.trim() || undefined,
-      city: input.city?.trim() || undefined,
-      state: input.department?.trim() || undefined,
-      country: readEnv("ORBITA_CRM_CONTACT_COUNTRY", "GHL_CONTACT_COUNTRY") || "CO",
-      source: input.source,
+      ...contactFields,
       createNewIfDuplicateAllowed: false,
-      customFields: customFields.length > 0 ? customFields : undefined,
     }),
   });
 
   const contactId = response.contact?.id;
   if (!contactId) throw new Error("El CRM no devolvió el identificador del contacto.");
+
+  // El upsert se hace sin correo para que la coincidencia dependa primero del
+  // teléfono. Después completamos el contacto exacto por ID con el resto de datos.
+  const updated = await crmRequest<CrmContactUpdateResponse>(
+    `/contacts/${encodeURIComponent(contactId)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        ...contactFields,
+        email: input.email?.trim() || undefined,
+      }),
+    }
+  );
+  if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
+    throw new Error("El CRM no confirmó la actualización completa del contacto.");
+  }
   return contactId;
 }
 
@@ -471,8 +508,8 @@ export async function createCrmContactNote(contactId: string, title: string, bod
 async function triggerCrmMessageWorkflow(input: {
   contactId: string;
   message: string;
-  customFieldKey: string | undefined;
-  workflowId: string | undefined;
+  customFieldKey: string;
+  workflowId: string;
   configurationError: string;
 }) {
   if (!input.customFieldKey || !input.workflowId) {
@@ -509,14 +546,8 @@ export async function triggerCrmOrderConfirmationWorkflow(contactId: string, mes
   return triggerCrmMessageWorkflow({
     contactId,
     message,
-    customFieldKey: readEnv(
-      "ORBITA_CRM_ORDER_CONFIRMATION_CUSTOM_FIELD_KEY",
-      "GHL_ORDER_CONFIRMATION_CUSTOM_FIELD_KEY"
-    ),
-    workflowId: readEnv(
-      "ORBITA_CRM_ORDER_CONFIRMATION_WORKFLOW_ID",
-      "GHL_ORDER_CONFIRMATION_WORKFLOW_ID"
-    ),
+    customFieldKey: CRM_MESSAGE_FIELD_KEYS.customerNotification,
+    workflowId: CRM_WORKFLOW_IDS.customerNotification,
     configurationError:
       "Configura el campo y el workflow de confirmación de pedidos para clientes.",
   });
@@ -526,37 +557,19 @@ export async function triggerCrmNewOrderNotificationWorkflow(contactId: string, 
   return triggerCrmMessageWorkflow({
     contactId,
     message,
-    customFieldKey: readEnv(
-      "ORBITA_CRM_NEW_ORDER_CUSTOM_FIELD_KEY",
-      "GHL_NEW_ORDER_CUSTOM_FIELD_KEY"
-    ),
-    workflowId: readEnv(
-      "ORBITA_CRM_NEW_ORDER_WORKFLOW_ID",
-      "GHL_NEW_ORDER_WORKFLOW_ID"
-    ),
+    customFieldKey: CRM_MESSAGE_FIELD_KEYS.storeNotification,
+    workflowId: CRM_WORKFLOW_IDS.storeNotification,
     configurationError:
       "Configura el campo y el workflow interno de notificaciones de nuevo pedido.",
   });
 }
 
 function getQuoteWorkflowConfig() {
-  const quoteFieldKey = readEnv(
-    "ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY",
-    "GHL_QUOTE_CUSTOM_FIELD_KEY"
-  );
-  const unavailableProductsFieldKey = readEnv(
-    "ORBITA_CRM_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY",
-    "GHL_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY"
-  );
-  const workflowId = readEnv("ORBITA_CRM_QUOTE_WORKFLOW_ID", "GHL_QUOTE_WORKFLOW_ID");
-
-  if (!quoteFieldKey || !unavailableProductsFieldKey || !workflowId) {
-    throw new CrmConfigurationError(
-      "Configura las keys de los campos de cotización y productos no disponibles, además del workflow de cotización."
-    );
-  }
-
-  return { quoteFieldKey, unavailableProductsFieldKey, workflowId };
+  return {
+    quoteFieldKey: CRM_MESSAGE_FIELD_KEYS.quote,
+    unavailableProductsFieldKey: CRM_MESSAGE_FIELD_KEYS.unavailableProducts,
+    workflowId: CRM_WORKFLOW_IDS.quote,
+  };
 }
 
 /**

@@ -6,10 +6,27 @@ import clsx from "clsx";
 import { ArrowLeft, MapPin } from "lucide-react";
 import { useCart } from "@/context/cart-context";
 import { formatCOP } from "@/lib/currency";
-import { DELIVERY_MINIMUM_SUBTOTAL } from "@/lib/messaging";
+import { DATA_POLICY_URL, DELIVERY_MINIMUM_SUBTOTAL } from "@/lib/messaging";
 import { createOrder } from "@/actions/orders";
 import { useToast } from "@/components/ui/Toast";
 import type { DeliveryMethod, StoreLocation } from "@/lib/types";
+
+const PHONE_COUNTRIES = [
+  { iso: "CO", name: "Colombia", dial: "+57" },
+  { iso: "VE", name: "Venezuela", dial: "+58" },
+  { iso: "EC", name: "Ecuador", dial: "+593" },
+  { iso: "PE", name: "Perú", dial: "+51" },
+  { iso: "PA", name: "Panamá", dial: "+507" },
+  { iso: "MX", name: "México", dial: "+52" },
+  { iso: "CL", name: "Chile", dial: "+56" },
+  { iso: "AR", name: "Argentina", dial: "+54" },
+  { iso: "BR", name: "Brasil", dial: "+55" },
+  { iso: "CR", name: "Costa Rica", dial: "+506" },
+  { iso: "DO", name: "Rep. Dominicana", dial: "+1" },
+  { iso: "US", name: "Estados Unidos", dial: "+1" },
+  { iso: "CA", name: "Canadá", dial: "+1" },
+  { iso: "ES", name: "España", dial: "+34" },
+] as const;
 
 export function CheckoutForm({
   locations,
@@ -23,6 +40,7 @@ export function CheckoutForm({
   const [name, setName] = useState("");
   const [cedula, setCedula] = useState("");
   const [phone, setPhone] = useState("");
+  const [phoneCountryIso, setPhoneCountryIso] = useState("CO");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [neighborhood, setNeighborhood] = useState("");
@@ -30,6 +48,7 @@ export function CheckoutForm({
   const [city, setCity] = useState("");
   const [department, setDepartment] = useState("");
   const [notes, setNotes] = useState("");
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [locationId, setLocationId] = useState(locations.length === 1 ? locations[0].id : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +58,8 @@ export function CheckoutForm({
     customerConfirmationSent: boolean;
   } | null>(null);
   const selectedLocation = locations.find((location) => location.id === locationId) ?? null;
+  const selectedPhoneCountry =
+    PHONE_COUNTRIES.find((country) => country.iso === phoneCountryIso) ?? PHONE_COUNTRIES[0];
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,6 +77,11 @@ export function CheckoutForm({
       });
       return;
     }
+    if (!privacyAccepted) {
+      setError("Debes aceptar la política de tratamiento de datos para continuar.");
+      toast.warning("Acepta la política de tratamiento de datos");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     const toastId = toast.loading("Enviando tu solicitud...");
@@ -64,6 +90,8 @@ export function CheckoutForm({
       customerName: name,
       customerCedula: cedula,
       customerPhone: phone,
+      phoneCountryCode: selectedPhoneCountry.dial,
+      phoneCountryIso: selectedPhoneCountry.iso,
       customerEmail: email,
       locationId: deliveryMethod === "recoger" ? selectedLocation?.id : undefined,
       deliveryMethod,
@@ -73,6 +101,7 @@ export function CheckoutForm({
       city: deliveryMethod === "domicilio" ? city : undefined,
       department: deliveryMethod === "domicilio" ? department : undefined,
       notes,
+      privacyAccepted,
       items,
     });
 
@@ -210,14 +239,33 @@ export function CheckoutForm({
             onChange={(e) => setCedula(e.target.value)}
             className="w-full rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
           />
-          <input
-            required
-            type="tel"
-            placeholder="WhatsApp / Teléfono"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="w-full rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
-          />
+          <div className="grid grid-cols-[minmax(128px,0.42fr)_minmax(0,1fr)] gap-2">
+            <label className="sr-only" htmlFor="phone-country">País del teléfono</label>
+            <select
+              id="phone-country"
+              value={phoneCountryIso}
+              onChange={(event) => setPhoneCountryIso(event.target.value)}
+              className="min-w-0 rounded-lg border border-[#cacaca] bg-white px-2.5 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            >
+              {PHONE_COUNTRIES.map((country) => (
+                <option key={country.iso} value={country.iso}>
+                  {country.name} {country.dial}
+                </option>
+              ))}
+            </select>
+            <label className="sr-only" htmlFor="customer-phone">WhatsApp o teléfono</label>
+            <input
+              id="customer-phone"
+              required
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel-national"
+              placeholder="WhatsApp / Teléfono"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="min-w-0 rounded-lg border border-[#cacaca] px-3 py-2.5 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
+            />
+          </div>
           <input
             type="email"
             placeholder="Correo electrónico (opcional)"
@@ -330,12 +378,35 @@ export function CheckoutForm({
           </div>
         </div>
 
+        <label className="flex items-start gap-3 rounded-xl border border-[#cacaca] bg-white p-3.5 text-sm leading-5 text-[#545454]/80">
+          <input
+            required
+            type="checkbox"
+            checked={privacyAccepted}
+            onChange={(event) => setPrivacyAccepted(event.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#cacaca] accent-brand"
+          />
+          <span>
+            Acepto la{" "}
+            <a
+              href={DATA_POLICY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-brand underline underline-offset-2"
+            >
+              política de tratamiento de datos
+            </a>
+            . Se abrirá en otra pestaña para conservar este formulario.
+          </span>
+        </label>
+
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <button
           type="submit"
           disabled={
             submitting ||
+            !privacyAccepted ||
             (deliveryMethod === "domicilio" && subtotal <= DELIVERY_MINIMUM_SUBTOTAL)
           }
           className="w-full rounded-lg bg-brand py-3 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"

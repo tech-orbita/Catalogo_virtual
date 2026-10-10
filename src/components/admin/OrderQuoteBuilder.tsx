@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { MapPin, PackageCheck, Plus, Send, Trash2, UserRound } from "lucide-react";
+import { ChevronDown, MapPin, PackageCheck, Plus, Search, Send, Trash2, UserRound } from "lucide-react";
 import clsx from "clsx";
 import {
   triggerOrderQuoteWorkflow,
@@ -21,16 +21,20 @@ export interface QuoteCatalogOption {
 
 interface DraftQuoteLine {
   id: string;
+  kind: "catalog" | "custom";
   optionKey: string;
+  customName: string;
   quantity: string;
   unitPrice: string;
   available: boolean;
 }
 
-function createEmptyLine(index: number): DraftQuoteLine {
+function createEmptyLine(index: number, kind: DraftQuoteLine["kind"] = "catalog"): DraftQuoteLine {
   return {
     id: `new-${Date.now()}-${index}`,
+    kind,
     optionKey: "",
+    customName: "",
     quantity: "1",
     unitPrice: "",
     available: true,
@@ -41,7 +45,9 @@ function createInitialLines(order: OrderWithItems): DraftQuoteLine[] {
   if (order.quote_items?.length) {
     return order.quote_items.map((item, index) => ({
       id: `quote-${index}-${item.product_id}-${item.variant_id ?? "base"}`,
-      optionKey: `${item.product_id}:${item.variant_id ?? ""}`,
+      kind: item.product_id ? "catalog" as const : "custom" as const,
+      optionKey: item.product_id ? `${item.product_id}:${item.variant_id ?? ""}` : "",
+      customName: item.product_id ? "" : item.product_name,
       quantity: String(item.quantity),
       unitPrice: String(item.unit_price),
       available: item.available,
@@ -50,11 +56,141 @@ function createInitialLines(order: OrderWithItems): DraftQuoteLine[] {
 
   return order.items.map((item) => ({
     id: item.id,
+    kind: item.product_id ? "catalog" as const : "custom" as const,
     optionKey: item.product_id ? `${item.product_id}:${item.variant_id ?? ""}` : "",
+    customName: item.product_id ? "" : item.product_name_snapshot,
     quantity: String(item.quantity),
     unitPrice: String(item.unit_price),
     available: true,
   }));
+}
+
+function normalizeSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("es-CO")
+    .trim();
+}
+
+function SearchableProductSelect({
+  lineId,
+  labelId,
+  optionKey,
+  options,
+  disabled,
+  onSelect,
+}: {
+  lineId: string;
+  labelId: string;
+  optionKey: string;
+  options: QuoteCatalogOption[];
+  disabled: boolean;
+  onSelect: (optionKey: string) => void;
+}) {
+  const selected = options.find((option) => option.key === optionKey);
+  const [query, setQuery] = useState(selected?.label ?? "");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const normalizedQuery = normalizeSearch(query);
+  const matches = useMemo(() => {
+    const tokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    return options
+      .filter((option) => {
+        if (tokens.length === 0) return true;
+        const searchableLabel = normalizeSearch(option.label);
+        return tokens.every((token) => searchableLabel.includes(token));
+      })
+      .slice(0, 12);
+  }, [normalizedQuery, options]);
+  const listboxId = `quote-product-options-${lineId}`;
+
+  function choose(option: QuoteCatalogOption) {
+    setQuery(option.label);
+    onSelect(option.key);
+    setOpen(false);
+    setActiveIndex(0);
+  }
+
+  return (
+    <div className="relative mt-1.5">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        <input
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls={listboxId}
+          aria-expanded={open}
+          aria-labelledby={labelId}
+          autoComplete="off"
+          placeholder="Escribe el nombre completo"
+          value={query}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            if (selected && nextQuery !== selected.label) onSelect("");
+            setOpen(true);
+            setActiveIndex(0);
+          }}
+          onKeyDown={(event) => {
+            if (!open && event.key === "ArrowDown") {
+              setOpen(true);
+              return;
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              if (matches.length > 0) {
+                setActiveIndex((current) => Math.min(current + 1, matches.length - 1));
+              }
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(current - 1, 0));
+            } else if (event.key === "Enter" && open && matches[activeIndex]) {
+              event.preventDefault();
+              choose(matches[activeIndex]);
+            } else if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          disabled={disabled}
+          className="min-h-11 w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-9 text-sm text-slate-800 outline-none focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/10 disabled:bg-slate-100"
+        />
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+      </div>
+      {open && !disabled ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"
+        >
+          {matches.length > 0 ? (
+            matches.map((option, index) => (
+              <button
+                key={option.key}
+                type="button"
+                role="option"
+                aria-selected={option.key === optionKey}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => choose(option)}
+                className={clsx(
+                  "block w-full rounded-lg px-3 py-2.5 text-left text-sm transition focus:outline-none",
+                  index === activeIndex ? "bg-orbita-cyan-soft text-orbita-navy" : "text-slate-700"
+                )}
+              >
+                {option.label}
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-3 text-sm text-slate-500">No encontramos productos con ese nombre.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function OrderQuoteBuilder({
@@ -71,6 +207,9 @@ export function OrderQuoteBuilder({
   const toast = useToast();
   const [isPending, startTransition] = useTransition();
   const [lines, setLines] = useState<DraftQuoteLine[]>(() => createInitialLines(order));
+  const [quoteNote, setQuoteNote] = useState(
+    () => order.quote_items?.find((item) => item.quote_note)?.quote_note ?? ""
+  );
   const initialDeliveryFee =
     order.quote_delivery_fee ?? Math.max(Number(order.total) - Number(order.subtotal), 0);
   const [deliveryFee, setDeliveryFee] = useState(String(initialDeliveryFee));
@@ -122,8 +261,8 @@ export function OrderQuoteBuilder({
     setLines((current) => current.filter((line) => line.id !== id));
   }
 
-  function addLine() {
-    setLines((current) => [...current, createEmptyLine(current.length)]);
+  function addLine(kind: DraftQuoteLine["kind"]) {
+    setLines((current) => [...current, createEmptyLine(current.length, kind)]);
   }
 
   function buildItems(): QuoteOrderItemInput[] | null {
@@ -135,23 +274,29 @@ export function OrderQuoteBuilder({
     const items: QuoteOrderItemInput[] = [];
     for (const line of lines) {
       const option = optionByKey.get(line.optionKey);
+      const productName = line.kind === "custom" ? line.customName.trim() : option?.label;
       const quantity = Number(line.quantity);
       const unitPrice = Number(line.unitPrice);
-      if (!option) {
+      if (line.kind === "catalog" && !option) {
         setFeedback({ kind: "error", message: "Selecciona un producto válido en cada línea." });
         return null;
       }
+      if (line.kind === "custom" && !productName) {
+        setFeedback({ kind: "error", message: "Escribe el nombre de cada producto personalizado." });
+        return null;
+      }
       if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
-        setFeedback({ kind: "error", message: `Revisa la cantidad de ${option.label}.` });
+        setFeedback({ kind: "error", message: `Revisa la cantidad de ${productName}.` });
         return null;
       }
       if (!Number.isFinite(unitPrice) || unitPrice < 0) {
-        setFeedback({ kind: "error", message: `Revisa el precio de ${option.label}.` });
+        setFeedback({ kind: "error", message: `Revisa el precio de ${productName}.` });
         return null;
       }
       items.push({
-        productId: option.productId,
-        variantId: option.variantId,
+        productId: option?.productId ?? null,
+        variantId: option?.variantId ?? null,
+        customName: line.kind === "custom" ? line.customName : undefined,
         quantity,
         unitPrice,
         available: line.available,
@@ -176,9 +321,10 @@ export function OrderQuoteBuilder({
       const result = await triggerOrderQuoteWorkflow(order.id, {
         items,
         deliveryFee: parsedDeliveryFee,
+        quoteNote,
       });
 
-      if ("error" in result && result.error) {
+      if ("error" in result) {
         setFeedback({ kind: "error", message: result.error });
         toast.update(toastId, {
           variant: "error",
@@ -265,15 +411,26 @@ export function OrderQuoteBuilder({
               <h3 className="text-sm font-semibold text-slate-800">Productos</h3>
               <p className="mt-0.5 text-xs text-slate-500">Cada línea puede editarse o marcarse como no disponible.</p>
             </div>
-            <button
-              type="button"
-              onClick={addLine}
-              disabled={isPending || !canSend}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-orbita-cyan/40 bg-white px-3 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-orbita-cyan-soft disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Plus size={16} />
-              Agregar producto
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => addLine("catalog")}
+                disabled={isPending || !canSend}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-orbita-cyan/40 bg-white px-3 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-orbita-cyan-soft disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus size={16} />
+                Del catálogo
+              </button>
+              <button
+                type="button"
+                onClick={() => addLine("custom")}
+                disabled={isPending || !canSend}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-orbita-navy px-3 py-2 text-sm font-semibold text-white transition hover:bg-orbita-navy/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Plus size={16} />
+                Producto personalizado
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -286,22 +443,32 @@ export function OrderQuoteBuilder({
                 )}
               >
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_100px_140px_auto] lg:items-end">
-                  <label className="block text-xs font-medium text-slate-600">
-                    Producto {index + 1}
-                    <select
-                      value={line.optionKey}
-                      onChange={(event) => selectProduct(line.id, event.target.value)}
-                      disabled={isPending || !canSend}
-                      className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/10 disabled:bg-slate-100"
-                    >
-                      <option value="">Seleccionar producto</option>
-                      {catalogOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="block text-xs font-medium text-slate-600">
+                    <span id={`quote-product-label-${line.id}`}>
+                      {line.kind === "custom" ? `Producto personalizado ${index + 1}` : `Producto ${index + 1}`}
+                    </span>
+                    {line.kind === "custom" ? (
+                      <input
+                        type="text"
+                        aria-labelledby={`quote-product-label-${line.id}`}
+                        maxLength={160}
+                        placeholder="Nombre o descripción del producto"
+                        value={line.customName}
+                        onChange={(event) => updateLine(line.id, { customName: event.target.value })}
+                        disabled={isPending || !canSend}
+                        className="mt-1.5 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/10 disabled:bg-slate-100"
+                      />
+                    ) : (
+                      <SearchableProductSelect
+                        lineId={line.id}
+                        labelId={`quote-product-label-${line.id}`}
+                        optionKey={line.optionKey}
+                        options={catalogOptions}
+                        disabled={isPending || !canSend}
+                        onSelect={(optionKey) => selectProduct(line.id, optionKey)}
+                      />
+                    )}
+                  </div>
 
                   <label className="block text-xs font-medium text-slate-600">
                     Cantidad
@@ -362,6 +529,20 @@ export function OrderQuoteBuilder({
             ))}
           </div>
         </div>
+
+        <label className="block text-xs font-medium text-slate-600">
+          Notas de la cotización
+          <textarea
+            rows={4}
+            maxLength={1000}
+            value={quoteNote}
+            onChange={(event) => setQuoteNote(event.target.value)}
+            disabled={isPending || !canSend}
+            placeholder="Agrega condiciones, aclaraciones o información especial para el cliente."
+            className="mt-1.5 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/10 disabled:bg-slate-100"
+          />
+          <span className="mt-1 block text-right text-[11px] text-slate-400">{quoteNote.length}/1000</span>
+        </label>
 
         <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 md:grid-cols-[minmax(0,1fr)_260px] md:items-end">
           <div>

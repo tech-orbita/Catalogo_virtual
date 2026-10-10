@@ -44,6 +44,7 @@ export default async function PedidoDetailPage({
     optionKeys.add(key);
   }
   for (const item of order.quote_items ?? []) {
+    if (!item.product_id) continue;
     const key = `${item.product_id}:${item.variant_id ?? ""}`;
     if (optionKeys.has(key)) continue;
     catalogOptions.push({

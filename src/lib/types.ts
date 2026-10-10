@@ -143,7 +143,7 @@ export interface Order {
 }
 
 export interface OrderQuoteItem {
-  product_id: string;
+  product_id: string | null;
   variant_id: string | null;
   product_name: string;
   variant_label: string | null;
@@ -151,6 +151,7 @@ export interface OrderQuoteItem {
   unit_price: number;
   subtotal: number;
   available: boolean;
+  quote_note?: string | null;
 }
 
 export interface OrderItem {

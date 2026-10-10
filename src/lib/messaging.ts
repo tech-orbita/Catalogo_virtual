@@ -4,6 +4,7 @@ import type { DeliveryMethod, OrderQuoteItem, OrderWithItems } from "@/lib/types
 /** Tope conservador para el campo multiline y el cuerpo del mensaje del proveedor. */
 export const QUOTE_SUMMARY_MAX_LENGTH = 1600;
 export const DELIVERY_MINIMUM_SUBTOTAL = 50_000;
+export const DATA_POLICY_URL = "https://Tyc.puntosorganic.com";
 
 type OrderMessageInput = {
   orderNumber: number;
@@ -19,6 +20,7 @@ type OrderMessageInput = {
   department?: string | null;
   locationName?: string | null;
   notes?: string | null;
+  privacyAccepted?: boolean;
   items: Array<{
     productName: string;
     variantLabel?: string | null;
@@ -96,6 +98,9 @@ export function buildOperationalOrderAlert(order: OrderMessageInput): string {
   appendOrderItems(lines, order.items);
   lines.push("", `Subtotal de productos: ${formatCOP(order.subtotal)}`);
   if (order.notes) lines.push("", `Notas: ${order.notes}`);
+  if (order.privacyAccepted) {
+    lines.push("", `Tratamiento de datos: Aceptado (${DATA_POLICY_URL})`);
+  }
   return lines.join("\n");
 }
 
@@ -131,7 +136,8 @@ export function buildStructuredQuoteMessage(
     | "location_name_snapshot"
   >,
   items: OrderQuoteItem[],
-  deliveryFee: number
+  deliveryFee: number,
+  quoteNote?: string | null
 ): string {
   const availableItems = items.filter((item) => item.available);
   const unavailableItems = items.filter((item) => !item.available);
@@ -184,6 +190,7 @@ export function buildStructuredQuoteMessage(
     lines.push(`Domicilio: ${formatCOP(deliveryFee)}`);
   }
   lines.push(`Total: ${formatCOP(total)}`);
+  if (quoteNote) lines.push("", `Notas de la cotización: ${quoteNote}`);
   lines.push("Si no ves los botones, responde APROBAR o RECHAZAR.");
   return lines.join("\n");
 }
@@ -203,6 +210,7 @@ export function buildOrderCrmNote(order: {
   department?: string | null;
   locationName?: string | null;
   notes?: string | null;
+  privacyAccepted?: boolean;
   items: Array<{
     productName: string;
     variantLabel?: string | null;
@@ -243,5 +251,8 @@ export function buildOrderCrmNote(order: {
   }
   lines.push("", `Subtotal: ${formatCOP(order.subtotal)}`, `Total: ${formatCOP(order.total)}`);
   if (order.notes) lines.push("", `Notas: ${order.notes}`);
+  if (order.privacyAccepted) {
+    lines.push("", `Tratamiento de datos: Aceptado (${DATA_POLICY_URL})`);
+  }
   return lines.join("\n");
 }

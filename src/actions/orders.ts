@@ -12,6 +12,7 @@ import {
   triggerCrmOrderConfirmationWorkflow,
   triggerCrmQuoteWorkflow,
   upsertCrmContact,
+  normalizePhoneForCrm,
 } from "@/lib/crm";
 import {
   buildOperationalOrderAlert,
@@ -35,6 +36,8 @@ export interface CreateOrderInput {
   customerName: string;
   customerCedula: string;
   customerPhone: string;
+  phoneCountryCode?: string;
+  phoneCountryIso?: string;
   customerEmail?: string;
   locationId?: string;
   deliveryMethod: DeliveryMethod;
@@ -44,6 +47,7 @@ export interface CreateOrderInput {
   city?: string;
   department?: string;
   notes?: string;
+  privacyAccepted?: boolean;
   items: CartItem[];
 }
 
@@ -58,14 +62,24 @@ export interface CreateManualOrderInput extends Omit<CreateOrderInput, "items"> 
   items: ManualOrderItemInput[];
 }
 
-export interface QuoteOrderItemInput extends ManualOrderItemInput {
+export interface QuoteOrderItemInput {
+  productId: string | null;
+  variantId: string | null;
+  customName?: string;
+  quantity: number;
+  unitPrice: number;
   available: boolean;
 }
 
 export interface TriggerOrderQuoteWorkflowInput {
   items: QuoteOrderItemInput[];
   deliveryFee: number;
+  quoteNote?: string;
 }
+
+export type TriggerOrderQuoteWorkflowResult =
+  | { error: string }
+  | { success: true; status: "cotizacion_enviada" | "no_hubo_producto"; warning?: string };
 
 export interface CreateOrderResult {
   orderId: string;
@@ -277,6 +291,60 @@ async function resolveItems(
   return { items: resolved };
 }
 
+async function resolveQuoteItems(
+  items: QuoteOrderItemInput[]
+): Promise<{ items: ResolvedOrderItem[] } | { error: string }> {
+  if (items.length === 0) return { error: "La cotización no tiene productos." };
+  if (items.length > 100) return { error: "La cotización supera el máximo de 100 líneas." };
+
+  const catalogInputs = items.filter((item) => item.productId !== null) as Array<
+    QuoteOrderItemInput & { productId: string }
+  >;
+  const resolvedCatalog = catalogInputs.length
+    ? await resolveItems(catalogInputs, true)
+    : { items: [] as ResolvedOrderItem[] };
+  if ("error" in resolvedCatalog) return resolvedCatalog;
+
+  const resolved: ResolvedOrderItem[] = [];
+  let catalogIndex = 0;
+  for (const item of items) {
+    if (item.productId !== null) {
+      resolved.push(resolvedCatalog.items[catalogIndex]);
+      catalogIndex += 1;
+      continue;
+    }
+
+    const productName = normalizeCatalogName(item.customName ?? "");
+    if (!productName || productName.length > 160) {
+      return { error: "Escribe un nombre válido para cada producto personalizado." };
+    }
+    if (item.variantId) {
+      return { error: `El producto personalizado ${productName} no puede tener una variante del catálogo.` };
+    }
+
+    const quantity = Number(item.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) {
+      return { error: `La cantidad de ${productName} no es válida.` };
+    }
+    const unitPrice = Number(item.unitPrice);
+    if (!Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 100_000_000) {
+      return { error: `El precio de ${productName} no es válido.` };
+    }
+
+    resolved.push({
+      productId: "",
+      variantId: null,
+      productName,
+      variantLabel: null,
+      quantity,
+      unitPrice,
+      subtotal: unitPrice * quantity,
+    });
+  }
+
+  return { items: resolved };
+}
+
 async function prepareCrmContact(
   input: Omit<CreateOrderInput, "items">,
   source: "catalogo" | "asesor"
@@ -286,6 +354,8 @@ async function prepareCrmContact(
       name: input.customerName,
       email: input.customerEmail,
       phone: input.customerPhone,
+      countryCallingCode: input.phoneCountryCode,
+      countryCode: input.phoneCountryIso,
       cedula: input.customerCedula,
       address: [input.address, input.neighborhood, input.addressDetails].filter(Boolean).join(", ") || null,
       city: input.city,
@@ -372,6 +442,7 @@ async function attachOrderNote(input: {
         department: input.customer.department,
         locationName: input.locationName,
         notes: input.customer.notes,
+        privacyAccepted: input.customer.privacyAccepted,
         items: input.items.map((item) => ({
           productName: item.productName,
           variantLabel: item.variantLabel,
@@ -411,6 +482,7 @@ async function sendCreatedOrderNotifications(input: {
     department: input.customer.department,
     locationName: input.location?.name ?? null,
     notes: input.customer.notes,
+    privacyAccepted: input.customer.privacyAccepted,
     items: input.items.map((item) => ({
       productName: item.productName,
       variantLabel: item.variantLabel,
@@ -474,7 +546,20 @@ async function sendCreatedOrderNotifications(input: {
 export async function createOrder(
   input: CreateOrderInput
 ): Promise<CreateOrderResult | { error: string }> {
-  const validationError = validateCustomer(input);
+  if (!input.privacyAccepted) {
+    return { error: "Debes aceptar la política de tratamiento de datos para continuar." };
+  }
+  if (!/^\+\d{1,4}$/.test(input.phoneCountryCode?.trim() ?? "")) {
+    return { error: "Selecciona un código de país válido para el teléfono." };
+  }
+  if (!/^[A-Z]{2}$/.test(input.phoneCountryIso?.trim().toUpperCase() ?? "")) {
+    return { error: "Selecciona un país válido para el teléfono." };
+  }
+  const normalizedPhone = normalizePhoneForCrm(input.customerPhone, input.phoneCountryCode);
+  if (!/^\+\d{8,15}$/.test(normalizedPhone)) {
+    return { error: "El teléfono no es válido para el país seleccionado." };
+  }
+  const validationError = validateCustomer({ ...input, customerPhone: normalizedPhone });
   if (validationError) return { error: validationError };
 
   const resolved = await resolveItems(input.items, false);
@@ -493,6 +578,7 @@ export async function createOrder(
 
   const customerInput: Omit<CreateOrderInput, "items"> = {
     ...input,
+    customerPhone: normalizedPhone,
     locationId: input.deliveryMethod === "recoger" ? input.locationId : undefined,
   };
   const locationResult = await validateLocationSelection(customerInput.locationId, {
@@ -693,7 +779,7 @@ export async function updatePaymentStatus(orderId: string, paymentStatus: Paymen
 export async function triggerOrderQuoteWorkflow(
   orderId: string,
   input: TriggerOrderQuoteWorkflowInput
-) {
+): Promise<TriggerOrderQuoteWorkflowResult> {
   const { supabase, user } = await requireAdmin();
   if (!user) return { error: "No autorizado." };
 
@@ -708,8 +794,13 @@ export async function triggerOrderQuoteWorkflow(
     return { error: "Solo puedes cotizar pedidos pendientes o reenviar una cotización." };
   }
 
-  const resolved = await resolveItems(input.items, true);
+  const resolved = await resolveQuoteItems(input.items);
   if ("error" in resolved) return resolved;
+
+  const quoteNote = input.quoteNote?.trim() || null;
+  if (quoteNote && quoteNote.length > 1_000) {
+    return { error: "Las notas de la cotización no pueden superar 1000 caracteres." };
+  }
 
   const requestedDeliveryFee = Number(input.deliveryFee);
   if (!Number.isFinite(requestedDeliveryFee) || requestedDeliveryFee < 0 || requestedDeliveryFee > 100_000_000) {
@@ -717,7 +808,7 @@ export async function triggerOrderQuoteWorkflow(
   }
   const deliveryFee = order.delivery_method === "domicilio" ? requestedDeliveryFee : 0;
   const quoteItems: OrderQuoteItem[] = resolved.items.map((item, index) => ({
-    product_id: item.productId,
+    product_id: item.productId || null,
     variant_id: item.variantId,
     product_name: item.productName,
     variant_label: item.variantLabel,
@@ -725,6 +816,7 @@ export async function triggerOrderQuoteWorkflow(
     unit_price: item.unitPrice,
     subtotal: item.subtotal,
     available: input.items[index]?.available !== false,
+    ...(index === 0 && quoteNote ? { quote_note: quoteNote } : {}),
   }));
   const availableItems = quoteItems.filter((item) => item.available);
   const unavailableProducts = [
@@ -732,7 +824,7 @@ export async function triggerOrderQuoteWorkflow(
   ];
   const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
   const total = subtotal + deliveryFee;
-  const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee);
+  const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee, quoteNote);
   if (quoteSummary.length > QUOTE_SUMMARY_MAX_LENGTH) {
     return {
       error: "La cotización es demasiado extensa. Reduce la cantidad de productos o simplifica las variantes.",

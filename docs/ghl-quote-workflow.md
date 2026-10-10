@@ -1,8 +1,8 @@
-# Workflow GHL: cotización interactiva del catálogo
+# Workflows GHL y plantillas de goGHL.ai
 
-Este flujo reemplaza el envío directo por `/conversations/messages`. La aplicación solo guarda el resumen en el contacto y activa el workflow. goGHL.ai conserva el control del proveedor y de los ocho números.
+La aplicación no envía directamente por `/conversations/messages`: primero actualiza un custom field del contacto y después lo inscribe en el workflow correspondiente. goGHL.ai conserva el control del proveedor y del número remitente.
 
-## 1. Campos del contacto
+## 1. Custom fields del contacto
 
 Campo multiline existente:
 
@@ -20,16 +20,25 @@ Campo multiselección creado para la disponibilidad:
 - Key usada por la aplicación: `productos_no_disponibles`
 - Opciones: todos los productos activos del catálogo
 
-Configura las keys, no los IDs:
+Campos multiline que debes crear para los pedidos:
 
-```env
-ORBITA_CRM_QUOTE_CUSTOM_FIELD_KEY=resumen_de_cotizacion
-ORBITA_CRM_UNAVAILABLE_PRODUCTS_CUSTOM_FIELD_KEY=productos_no_disponibles
+| Nombre | Tipo | Key completa en GHL | Uso |
+| --- | --- | --- | --- |
+| `Confirmación nuevo pedido` | `Multi Line` | `contact.confirmacion_nuevo_pedido` | Mensaje completo para el cliente |
+| `Notificación nuevo pedido` | `Multi Line` | `contact.notificacion_nuevo_pedido` | Mensaje completo para la sede o centro logístico |
+
+Créelos en **Settings → Custom Fields → Contact**. La aplicación usa las keys sin el prefijo `contact.` y las mantiene versionadas en `src/lib/crm.ts`.
+
+La aplicación usa estas keys directamente:
+
+```text
+resumen_de_cotizacion
+productos_no_disponibles
 ```
 
 En el editor del workflow inserta el campo desde el selector de custom values. Debe quedar como `{{contact.resumen_de_cotizacion}}`.
 
-## 2. Crear el workflow
+## 2. Workflow: enviar cotización
 
 Nombre sugerido: `Catálogo | Enviar cotización interactiva`.
 
@@ -47,13 +56,41 @@ Configuración:
 
 No dejes vacíos los parámetros opcionales: goGHL.ai exige el literal `undefined`. `quick_reply` es el tipo correcto para una decisión; el texto visible de cada botón se mantiene por debajo del límite recomendado por el proveedor.
 
-Después de guardar el workflow copia su ID en:
+El workflow configurado en la aplicación es:
 
-```env
-ORBITA_CRM_QUOTE_WORKFLOW_ID=REEMPLAZAR_ID_WORKFLOW
+```text
+f60ba650-14ca-451d-87c4-6b3ab6eeb311
 ```
 
-## 3. Continuar el flujo actual
+## 3. Workflow: notificar al cliente
+
+- ID: `7280e96d-7915-4dc4-9cc7-e9ee4034790c`
+- Permitir reingreso: sí.
+- Trigger por cambio de campo: no; la aplicación inscribe al contacto.
+- Acción: enviar un mensaje normal por el canal de goGHL.ai.
+- Contenido completo de la acción:
+
+```text
+{{contact.confirmacion_nuevo_pedido}}
+```
+
+El campo ya contiene saludo, número de solicitud, modalidad de entrega, sede o dirección, productos, subtotal y aviso de revisión por un asesor. No agregues otro saludo ni dupliques el contenido dentro del workflow.
+
+## 4. Workflow: notificar a la sede
+
+- ID: `650f1434-4e4c-4c56-a25f-0abb01bf5e4a`
+- Permitir reingreso: sí.
+- Trigger por cambio de campo: no; la aplicación inscribe al contacto operativo.
+- Acción: enviar un mensaje normal por el canal de goGHL.ai.
+- Contenido completo de la acción:
+
+```text
+{{contact.notificacion_nuevo_pedido}}
+```
+
+Para recoger, el destinatario es el contacto creado o actualizado con el WhatsApp de la sede. Para domicilio, es el contacto del centro logístico. El campo contiene cliente, teléfono, cédula, entrega, dirección separada por campos, productos, subtotal, notas y constancia de aceptación del tratamiento de datos.
+
+## 5. Continuar el flujo de cotización
 
 Después del envío interactivo:
 
@@ -65,10 +102,10 @@ Después del envío interactivo:
 
 goGHL.ai documenta que el ID del `quick_reply` alimenta la rama correspondiente. Confirma en una prueba si el filtro del workflow expone el ID o el texto visible y selecciona el valor real que aparezca en el historial.
 
-## 4. Prueba controlada
+## 6. Prueba controlada
 
 1. Mantén el workflow en borrador mientras configuras el campo y las ramas.
-2. Publica únicamente cuando las keys y el workflow correspondan a la misma subcuenta.
+2. Publica únicamente cuando las cuatro keys y los tres workflows correspondan a la misma subcuenta.
 3. Usa un contacto autorizado y una cotización de prueba identificable.
 4. Verifica, en orden: campo multiline actualizado, una sola ejecución del workflow, número correcto, dos botones visibles, respuesta registrada y etapa correcta.
 5. Repite con el mismo contacto para comprobar el reingreso y que no se duplique el mensaje.
