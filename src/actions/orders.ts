@@ -923,6 +923,8 @@ export async function triggerOrderQuoteWorkflow(
       .update({ ghl_contact_id: contactId, ghl_sync_status: "error", ghl_sync_error: message })
       .eq("id", orderId);
     revalidatePath(`/admin/pedidos/${orderId}`);
-    return { error: "No se pudo enviar la cotización. Revisa la configuración del canal." };
+    return {
+      error: `No se pudo activar el workflow de cotización: ${message}`,
+    };
   }
 }
