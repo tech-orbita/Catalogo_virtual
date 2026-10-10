@@ -13,6 +13,7 @@ import {
   Package,
 } from "lucide-react";
 import { logout } from "@/actions/auth";
+import type { DashboardRole } from "@/lib/auth/access";
 
 const links = [
   { href: "/admin", label: "Resumen", icon: LayoutDashboard, exact: true },
@@ -23,8 +24,11 @@ const links = [
   { href: "/admin/sedes", label: "Sedes", icon: MapPinned },
 ];
 
-export function AdminSidebar({ email }: { email: string }) {
+export function AdminSidebar({ email, role }: { email: string; role: DashboardRole }) {
   const pathname = usePathname();
+  const visibleLinks = role === "operator"
+    ? links.filter((link) => link.href === "/admin/pedidos")
+    : links;
 
   return (
     <header className="sticky top-0 z-40 flex min-h-14 items-stretch border-b border-slate-200 bg-white/95 shadow-[0_6px_20px_rgba(4,36,56,0.04)] backdrop-blur">
@@ -32,7 +36,7 @@ export function AdminSidebar({ email }: { email: string }) {
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-3 py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         aria-label="Navegación del dashboard"
       >
-        {links.map(({ href, label, icon: Icon, exact }) => {
+        {visibleLinks.map(({ href, label, icon: Icon, exact }) => {
           const active = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/slugify";
 import { uploadImageAsset } from "@/lib/media";
 import { normalizeCatalogName } from "@/lib/catalog-name";
+import { requireCatalogAdmin } from "@/lib/auth/server-access";
 
 async function uniqueSlug(base: string, excludeId?: string): Promise<string> {
   const supabase = await createClient();
@@ -25,6 +26,7 @@ export async function createCategory(input: {
   parentId: string | null;
   imageUrl?: string | null;
 }) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const name = normalizeCatalogName(input.name);
 
@@ -55,6 +57,7 @@ export async function updateCategory(
   id: string,
   input: { name: string; imageUrl?: string | null }
 ) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const name = normalizeCatalogName(input.name);
   const slug = await uniqueSlug(name, id);
@@ -70,6 +73,7 @@ export async function updateCategory(
 }
 
 export async function deleteCategory(id: string) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { data, error: readError } = await supabase.from("categories").select("id, parent_id");
   if (readError) return { error: readError.message };
@@ -98,6 +102,7 @@ export async function deleteCategory(id: string) {
 }
 
 export async function uploadCategoryImage(categoryId: string, formData: FormData) {
+  await requireCatalogAdmin();
   const file = formData.get("file") as File | null;
   if (!file) return { error: "No se recibió el archivo." };
 
@@ -117,6 +122,7 @@ export async function uploadCategoryImage(categoryId: string, formData: FormData
 }
 
 export async function reorderCategories(orderedIds: string[]) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const results = await Promise.all(
     orderedIds.map((id, index) =>

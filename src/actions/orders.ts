@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCatalogName } from "@/lib/catalog-name";
+import { getDashboardRole } from "@/lib/auth/access";
 import {
   createCrmContactNote,
   CrmConfigurationError,
@@ -179,7 +180,7 @@ async function requireAdmin() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return { supabase, user };
+  return { supabase, user, role: getDashboardRole(user) };
 }
 
 async function validateLocationSelection(
@@ -640,8 +641,8 @@ export async function createOrder(
 export async function createManualOrder(
   input: CreateManualOrderInput
 ): Promise<CreateOrderResult | { error: string }> {
-  const { supabase, user } = await requireAdmin();
-  if (!user) return { error: "No autorizado." };
+  const { supabase, user, role } = await requireAdmin();
+  if (!user || role !== "admin") return { error: "No autorizado." };
 
   const validationError = validateCustomer(input);
   if (validationError) return { error: validationError };
@@ -699,8 +700,8 @@ export async function createManualOrder(
 
 export async function updateOrderStatus(orderId: string, status: OrderStatus) {
   if (!ORDER_STATUSES.has(status)) return { error: "Estado de pedido inválido." };
-  const { supabase, user } = await requireAdmin();
-  if (!user) return { error: "No autorizado." };
+  const { supabase, user, role } = await requireAdmin();
+  if (!user || role !== "admin") return { error: "No autorizado." };
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -764,8 +765,8 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
 
 export async function updatePaymentStatus(orderId: string, paymentStatus: PaymentStatus) {
   if (!PAYMENT_STATUSES.has(paymentStatus)) return { error: "Estado de pago inválido." };
-  const { supabase, user } = await requireAdmin();
-  if (!user) return { error: "No autorizado." };
+  const { supabase, user, role } = await requireAdmin();
+  if (!user || role !== "admin") return { error: "No autorizado." };
 
   const { error } = await supabase
     .from("orders")
@@ -780,8 +781,8 @@ export async function triggerOrderQuoteWorkflow(
   orderId: string,
   input: TriggerOrderQuoteWorkflowInput
 ): Promise<TriggerOrderQuoteWorkflowResult> {
-  const { supabase, user } = await requireAdmin();
-  if (!user) return { error: "No autorizado." };
+  const { supabase, user, role } = await requireAdmin();
+  if (!user || (role !== "admin" && role !== "operator")) return { error: "No autorizado." };
 
   const { data: order, error: orderError } = await supabase
     .from("orders")

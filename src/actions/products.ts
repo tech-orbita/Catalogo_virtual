@@ -6,6 +6,7 @@ import { slugify } from "@/lib/slugify";
 import { parseProductsWorkbook } from "@/lib/products-import";
 import { uploadImageAsset, uploadImageBytesAsset, deleteImageAsset } from "@/lib/media";
 import { normalizeCatalogName } from "@/lib/catalog-name";
+import { requireCatalogAdmin } from "@/lib/auth/server-access";
 
 export interface ProductFormInput {
   name: string;
@@ -42,6 +43,7 @@ async function setProductCategories(productId: string, categoryIds: string[]) {
 }
 
 export async function createProduct(input: ProductFormInput) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const name = normalizeCatalogName(input.name);
   const slug = await uniqueProductSlug(name);
@@ -70,6 +72,7 @@ export async function createProduct(input: ProductFormInput) {
 }
 
 export async function updateProduct(id: string, input: ProductFormInput) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const name = normalizeCatalogName(input.name);
   const slug = await uniqueProductSlug(name, id);
@@ -98,6 +101,7 @@ export async function updateProduct(id: string, input: ProductFormInput) {
 }
 
 export async function createDraftProduct() {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const slug = await uniqueProductSlug("nuevo-producto");
   const { data, error } = await supabase
@@ -111,6 +115,7 @@ export async function createDraftProduct() {
 }
 
 export async function deleteProduct(id: string) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("products").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -120,6 +125,7 @@ export async function deleteProduct(id: string) {
 }
 
 export async function bulkSetActive(ids: string[], active: boolean) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("products").update({ active }).in("id", ids);
   if (error) return { error: error.message };
@@ -129,6 +135,7 @@ export async function bulkSetActive(ids: string[], active: boolean) {
 }
 
 export async function bulkDeleteProducts(ids: string[]) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("products").delete().in("id", ids);
   if (error) return { error: error.message };
@@ -142,6 +149,7 @@ export async function addVariant(
   productId: string,
   input: { variantName: string; optionValue: string; priceOverride: number | null; sku: string | null }
 ) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("product_variants").insert({
     product_id: productId,
@@ -161,6 +169,7 @@ export async function updateVariant(
   productId: string,
   input: { variantName: string; optionValue: string; priceOverride: number | null; sku: string | null }
 ) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase
     .from("product_variants")
@@ -178,6 +187,7 @@ export async function updateVariant(
 }
 
 export async function deleteVariant(variantId: string, productId: string) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("product_variants").delete().eq("id", variantId);
   if (error) return { error: error.message };
@@ -188,6 +198,7 @@ export async function deleteVariant(variantId: string, productId: string) {
 
 // ---- Imágenes (Cloudflare R2) ----
 export async function uploadProductImage(productId: string, formData: FormData) {
+  await requireCatalogAdmin();
   const file = formData.get("file") as File | null;
   if (!file) return { error: "No se recibió el archivo." };
 
@@ -214,6 +225,7 @@ export async function uploadProductImage(productId: string, formData: FormData) 
 }
 
 export async function deleteProductImage(imageId: string, productId: string) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { data: image } = await supabase
     .from("product_images")
@@ -295,6 +307,7 @@ async function findOrCreateCategoryPath(
 }
 
 export async function importProductsFromXlsx(formData: FormData): Promise<ImportSummary> {
+  await requireCatalogAdmin();
   const file = formData.get("file") as File | null;
   const summary: ImportSummary = {
     productsCreated: 0,
@@ -427,6 +440,7 @@ export interface BulkImageSummary {
 }
 
 export async function importImagesZip(formData: FormData): Promise<BulkImageSummary> {
+  await requireCatalogAdmin();
   const JSZip = (await import("jszip")).default;
   const file = formData.get("file") as File | null;
   const summary: BulkImageSummary = {

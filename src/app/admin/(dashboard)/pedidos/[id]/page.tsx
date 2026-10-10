@@ -4,6 +4,8 @@ import { AdminTopbar } from "@/components/admin/AdminTopbar";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import type { QuoteCatalogOption } from "@/components/admin/OrderQuoteBuilder";
 import { getProducts } from "@/lib/data/queries";
+import { createClient } from "@/lib/supabase/server";
+import { getDashboardRole } from "@/lib/auth/access";
 
 export default async function PedidoDetailPage({
   params,
@@ -11,9 +13,11 @@ export default async function PedidoDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [order, products] = await Promise.all([
+  const supabase = await createClient();
+  const [order, products, authResult] = await Promise.all([
     getAdminOrderById(id),
     getProducts({ onlyActive: true }),
+    supabase.auth.getUser(),
   ]);
   if (!order) notFound();
 
@@ -61,7 +65,11 @@ export default async function PedidoDetailPage({
     <>
       <AdminTopbar title={`Pedido #${order.order_number}`} backHref="/admin/pedidos" />
       <div className="admin-enter p-4 sm:p-6">
-        <OrderDetail order={order} catalogOptions={catalogOptions} />
+        <OrderDetail
+          order={order}
+          catalogOptions={catalogOptions}
+          canManageOrder={getDashboardRole(authResult.data.user) === "admin"}
+        />
       </div>
     </>
   );

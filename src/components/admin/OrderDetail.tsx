@@ -35,7 +35,15 @@ const NEXT_ORDER_STAGE: Partial<
   },
 };
 
-export function OrderDetail({ order, catalogOptions }: { order: OrderWithItems; catalogOptions: QuoteCatalogOption[] }) {
+export function OrderDetail({
+  order,
+  catalogOptions,
+  canManageOrder,
+}: {
+  order: OrderWithItems;
+  catalogOptions: QuoteCatalogOption[];
+  canManageOrder: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [status, setStatus] = useState<OrderStatus>(order.status);
@@ -121,6 +129,7 @@ export function OrderDetail({ order, catalogOptions }: { order: OrderWithItems; 
           </div>
 
           <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.9fr)] sm:p-5">
+            {canManageOrder ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-sm font-semibold text-slate-800">
                   Estado del pedido
@@ -148,6 +157,12 @@ export function OrderDetail({ order, catalogOptions }: { order: OrderWithItems; 
                   </select>
                 </label>
               </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Estado actual</p>
+                <p className="mt-1 text-base text-slate-700">{ORDER_STATUS_LABELS[status]}</p>
+              </div>
+            )}
 
             <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
               <div className="flex items-center gap-2 text-sm font-semibold text-amber-950">
@@ -160,7 +175,7 @@ export function OrderDetail({ order, catalogOptions }: { order: OrderWithItems; 
             </div>
           </div>
 
-          {nextStage ? (
+          {canManageOrder && nextStage ? (
             <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div>
                 <p className="text-sm font-semibold text-slate-900">Siguiente paso recomendado</p>

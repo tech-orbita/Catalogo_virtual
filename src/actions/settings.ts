@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { uploadImageAsset } from "@/lib/media";
+import { requireCatalogAdmin } from "@/lib/auth/server-access";
 
 export async function updateStoreSettings(input: {
   storeName: string;
   description: string | null;
   whatsappNumber: string | null;
 }) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase
     .from("store_settings")
@@ -28,6 +30,7 @@ export async function updateStoreSettings(input: {
 }
 
 async function uploadStoreAsset(field: "logo_url" | "banner_url", formData: FormData) {
+  await requireCatalogAdmin();
   const file = formData.get("file") as File | null;
   if (!file) return { error: "No se recibió el archivo." };
 

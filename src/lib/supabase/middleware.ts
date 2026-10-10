@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { authCookieOptions } from "./cookie-options";
+import { getDashboardRole } from "@/lib/auth/access";
 
 function redirectWithSession(url: URL, response: NextResponse) {
   const redirectResponse = NextResponse.redirect(url);
@@ -41,6 +42,7 @@ export async function updateSession(request: NextRequest) {
 
   const isAdminRoute = request.nextUrl.pathname.startsWith("/admin");
   const isLoginRoute = request.nextUrl.pathname === "/admin/login";
+  const role = getDashboardRole(user);
 
   if (isAdminRoute && !isLoginRoute && !user) {
     const url = request.nextUrl.clone();
@@ -48,9 +50,30 @@ export async function updateSession(request: NextRequest) {
     return redirectWithSession(url, response);
   }
 
-  if (isLoginRoute && user) {
+  if (isAdminRoute && !isLoginRoute && user && !role) {
+    await supabase.auth.signOut();
     const url = request.nextUrl.clone();
-    url.pathname = "/admin";
+    url.pathname = "/admin/login";
+    url.searchParams.set("error", "sin-acceso");
+    return redirectWithSession(url, response);
+  }
+
+  if (role === "operator" && isAdminRoute && !isLoginRoute) {
+    const pathname = request.nextUrl.pathname;
+    const isOrderList = pathname === "/admin/pedidos";
+    const isOrderDetail = /^\/admin\/pedidos\/[0-9a-f-]{36}$/i.test(pathname);
+
+    if (!isOrderList && !isOrderDetail) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/admin/pedidos";
+      url.search = "";
+      return redirectWithSession(url, response);
+    }
+  }
+
+  if (isLoginRoute && user && role) {
+    const url = request.nextUrl.clone();
+    url.pathname = role === "operator" ? "/admin/pedidos" : "/admin";
     return redirectWithSession(url, response);
   }
 

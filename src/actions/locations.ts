@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { requireCatalogAdmin } from "@/lib/auth/server-access";
 
 export interface StoreLocationInput {
   name: string;
@@ -39,6 +40,7 @@ function revalidateLocationViews() {
 }
 
 export async function createStoreLocation(input: StoreLocationInput) {
+  await requireCatalogAdmin();
   const parsed = validateLocation(input);
   if ("error" in parsed) return parsed;
 
@@ -57,6 +59,7 @@ export async function createStoreLocation(input: StoreLocationInput) {
 }
 
 export async function updateStoreLocation(id: string, input: StoreLocationInput) {
+  await requireCatalogAdmin();
   const parsed = validateLocation(input);
   if ("error" in parsed) return parsed;
 
@@ -68,6 +71,7 @@ export async function updateStoreLocation(id: string, input: StoreLocationInput)
 }
 
 export async function setStoreLocationActive(id: string, active: boolean) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase
     .from("store_locations")
@@ -79,6 +83,7 @@ export async function setStoreLocationActive(id: string, active: boolean) {
 }
 
 export async function deleteStoreLocation(id: string) {
+  await requireCatalogAdmin();
   const supabase = await createClient();
   const { error } = await supabase.from("store_locations").delete().eq("id", id);
   if (error) return { error: error.message };
