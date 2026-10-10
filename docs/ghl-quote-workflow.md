@@ -52,10 +52,10 @@ Configuración:
 5. Pega este contenido completo en el mensaje, reemplazando el custom value si GHL generó una clave distinta:
 
 ```text
-#btn|Tu cotización está lista|{{contact.resumen_de_cotizacion}}|undefined*undefined|quick_reply*Aprobar*aprobar_cotizacion|quick_reply*Rechazar*rechazar_cotizacion
+#btn|{{contact.resumen_de_cotizacion}}|undefined|undefined*undefined|quick_reply*Aprobar*aprobar_cotizacion|quick_reply*Rechazar*rechazar_cotizacion
 ```
 
-No dejes vacíos los parámetros opcionales: goGHL.ai exige el literal `undefined`. `quick_reply` es el tipo correcto para una decisión; el texto visible de cada botón se mantiene por debajo del límite recomendado por el proveedor.
+El resumen completo debe ir en el campo principal (`title`). Si se coloca en `subTitle`, WhatsApp lo renderiza pequeño y con menor contraste. No dejes vacíos los parámetros opcionales: goGHL.ai exige el literal `undefined`. `quick_reply` es el tipo correcto para una decisión; el texto visible de cada botón se mantiene por debajo del límite recomendado por el proveedor.
 
 El workflow configurado en la aplicación es:
 

@@ -144,54 +144,57 @@ export function buildStructuredQuoteMessage(
   const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
   const total = subtotal + deliveryFee;
   const lines = [
-    `Cotización solicitud #${order.order_number}`,
-    `Cliente: ${order.customer_name}`,
-    `Teléfono: ${order.customer_phone}`,
-    `Cédula: ${order.customer_cedula}`,
+    `*Cotización solicitud #${order.order_number}*`,
+    "",
+    "*Datos del cliente*",
+    `*Cliente:* ${order.customer_name}`,
+    `*Teléfono:* ${order.customer_phone}`,
+    `*Cédula:* ${order.customer_cedula}`,
   ];
 
-  if (order.customer_email) lines.push(`Correo: ${order.customer_email}`);
+  if (order.customer_email) lines.push(`*Correo:* ${order.customer_email}`);
   lines.push(
     "",
-    `Entrega: ${order.delivery_method === "domicilio" ? "Domicilio" : "Recoger en tienda"}`
+    "*Datos de entrega*",
+    `*Modalidad:* ${order.delivery_method === "domicilio" ? "Domicilio" : "Recoger en tienda"}`
   );
-  if (order.location_name_snapshot) lines.push(`Sede: ${order.location_name_snapshot}`);
-  if (order.address) lines.push(`Dirección: ${order.address}`);
-  if (order.neighborhood) lines.push(`Barrio: ${order.neighborhood}`);
-  if (order.address_details) lines.push(`Indicaciones: ${order.address_details}`);
+  if (order.location_name_snapshot) lines.push(`*Sede:* ${order.location_name_snapshot}`);
+  if (order.address) lines.push(`*Dirección:* ${order.address}`);
+  if (order.neighborhood) lines.push(`*Barrio:* ${order.neighborhood}`);
+  if (order.address_details) lines.push(`*Indicaciones:* ${order.address_details}`);
   if (order.city || order.department) {
-    lines.push(`Ciudad: ${[order.city, order.department].filter(Boolean).join(", ")}`);
+    lines.push(`*Ciudad / departamento:* ${[order.city, order.department].filter(Boolean).join(", ")}`);
   }
 
   if (availableItems.length > 0) {
-    lines.push("", "Productos disponibles:");
+    lines.push("", "*Productos disponibles*");
     for (const item of availableItems) {
       const label = item.variant_label
         ? `${item.product_name} (${item.variant_label})`
         : item.product_name;
       lines.push(
-        `- ${label} · ${item.quantity} x ${formatCOP(item.unit_price)} = ${formatCOP(item.subtotal)}`
+        `• ${label}\n  ${item.quantity} × ${formatCOP(item.unit_price)} = *${formatCOP(item.subtotal)}*`
       );
     }
   }
 
   if (unavailableItems.length > 0) {
-    lines.push("", "Productos no disponibles:");
+    lines.push("", "*Productos no disponibles*");
     for (const item of unavailableItems) {
       const label = item.variant_label
         ? `${item.product_name} (${item.variant_label})`
         : item.product_name;
-      lines.push(`- ${label}`);
+      lines.push(`• ${label}`);
     }
   }
 
-  lines.push("", `Subtotal productos: ${formatCOP(subtotal)}`);
+  lines.push("", "*Resumen de valores*", `*Subtotal productos:* ${formatCOP(subtotal)}`);
   if (order.delivery_method === "domicilio") {
-    lines.push(`Domicilio: ${formatCOP(deliveryFee)}`);
+    lines.push(`*Domicilio:* ${formatCOP(deliveryFee)}`);
   }
-  lines.push(`Total: ${formatCOP(total)}`);
-  if (quoteNote) lines.push("", `Notas de la cotización: ${quoteNote}`);
-  lines.push("Si no ves los botones, responde APROBAR o RECHAZAR.");
+  lines.push(`*TOTAL: ${formatCOP(total)}*`);
+  if (quoteNote) lines.push("", "*Notas de la cotización*", quoteNote);
+  lines.push("", "_Si no ves los botones, responde APROBAR o RECHAZAR._");
   return lines.join("\n");
 }
 
