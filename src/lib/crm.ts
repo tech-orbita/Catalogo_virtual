@@ -8,6 +8,7 @@ const CRM_WORKFLOW_IDS = {
   customerNotification: "7280e96d-7915-4dc4-9cc7-e9ee4034790c",
 } as const;
 const CRM_MESSAGE_FIELD_KEYS = {
+  identificationNumber: "nmero_de_identificacin",
   quote: "resumen_de_cotizacion",
   unavailableProducts: "productos_no_disponibles",
   customerNotification: "confirmacion_nuevo_pedido",
@@ -21,6 +22,13 @@ const CRM_MESSAGE_FIELD_KEYS = {
  */
 function readEnv(name: string, legacyName: string) {
   return (process.env[name] ?? process.env[legacyName])?.trim();
+}
+
+function crmEventStartTime() {
+  // La API de workflows exige un offset no-UTC explícito y rechaza `Z`/`+00:00`.
+  const colombiaOffsetMs = 5 * 60 * 60 * 1_000;
+  const colombiaTime = new Date(Date.now() - colombiaOffsetMs).toISOString();
+  return `${colombiaTime.slice(0, 19)}-05:00`;
 }
 
 export class CrmConfigurationError extends Error {
@@ -443,10 +451,12 @@ export async function upsertCrmContact(input: CrmContactInput): Promise<string> 
   if (!phone) throw new Error("El teléfono no es válido para sincronizarlo con el CRM.");
 
   const { firstName, lastName } = splitName(input.name);
-  const customFields: Array<{ id: string; fieldValue: string }> = [];
-  const cedulaFieldId = readEnv("ORBITA_CRM_CEDULA_CUSTOM_FIELD_ID", "GHL_CEDULA_CUSTOM_FIELD_ID");
-  if (cedulaFieldId && input.cedula) {
-    customFields.push({ id: cedulaFieldId, fieldValue: input.cedula });
+  const customFields: Array<{ key: string; fieldValue: string }> = [];
+  if (input.cedula) {
+    customFields.push({
+      key: CRM_MESSAGE_FIELD_KEYS.identificationNumber,
+      fieldValue: input.cedula,
+    });
   }
 
   const contactFields = {
@@ -534,7 +544,7 @@ async function triggerCrmMessageWorkflow(input: {
     `/contacts/${encodedContactId}/workflow/${encodeURIComponent(input.workflowId)}`,
     {
       method: "POST",
-      body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
+      body: JSON.stringify({ eventStartTime: crmEventStartTime() }),
     }
   );
   if (enrolled.succeeded !== true && enrolled.succeded !== true) {
@@ -603,7 +613,7 @@ export async function triggerCrmQuoteWorkflow(
     `/contacts/${encodedContactId}/workflow/${encodeURIComponent(workflowId)}`,
     {
       method: "POST",
-      body: JSON.stringify({ eventStartTime: new Date().toISOString() }),
+      body: JSON.stringify({ eventStartTime: crmEventStartTime() }),
     }
   );
 

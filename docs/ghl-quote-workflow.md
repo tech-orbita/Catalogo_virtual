@@ -24,6 +24,7 @@ Campos multiline que debes crear para los pedidos:
 
 | Nombre | Tipo | Key completa en GHL | Uso |
 | --- | --- | --- | --- |
+| `Número de identificación` | `Single Line` | `contact.nmero_de_identificacin` | Cédula del cliente |
 | `Confirmación nuevo pedido` | `Multi Line` | `contact.confirmacion_nuevo_pedido` | Mensaje completo para el cliente |
 | `Notificación nuevo pedido` | `Multi Line` | `contact.notificacion_nuevo_pedido` | Mensaje completo para la sede o centro logístico |
 

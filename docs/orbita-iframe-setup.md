@@ -95,7 +95,7 @@ en `src/lib/crm.ts` para que el despliegue no dependa de variables opcionales:
 - notificar a la sede: `650f1434-4e4c-4c56-a25f-0abb01bf5e4a`;
 - notificar al cliente: `7280e96d-7915-4dc4-9cc7-e9ee4034790c`.
 
-El Private Integration Token debe pertenecer a la subcuenta y tener `contacts.write`, además de los permisos de oportunidades que ya usa el panel. Ya no necesita `conversations/message.write` para cotizar. Si deseas guardar la cédula como un campo visible independiente, crea el custom field en el CRM y agrega su id como `ORBITA_CRM_CEDULA_CUSTOM_FIELD_ID`; de todas formas, la cédula y el resto del pedido quedan incluidos en la nota.
+El Private Integration Token debe pertenecer a la subcuenta y tener `contacts.write`, además de los permisos de oportunidades que ya usa el panel. Ya no necesita `conversations/message.write` para cotizar. La cédula se guarda directamente en `contact.nmero_de_identificacin` y también queda incluida en la nota del pedido.
 
 ### Workflow y canal de salida
 
