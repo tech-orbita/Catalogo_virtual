@@ -61,9 +61,10 @@ export async function updateSession(request: NextRequest) {
   if (role === "operator" && isAdminRoute && !isLoginRoute) {
     const pathname = request.nextUrl.pathname;
     const isOrderList = pathname === "/admin/pedidos";
+    const isManualOrder = pathname === "/admin/pedidos/nuevo";
     const isOrderDetail = /^\/admin\/pedidos\/[0-9a-f-]{36}$/i.test(pathname);
 
-    if (!isOrderList && !isOrderDetail) {
+    if (!isOrderList && !isManualOrder && !isOrderDetail) {
       const url = request.nextUrl.clone();
       url.pathname = "/admin/pedidos";
       url.search = "";

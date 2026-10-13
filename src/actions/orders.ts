@@ -642,7 +642,7 @@ export async function createManualOrder(
   input: CreateManualOrderInput
 ): Promise<CreateOrderResult | { error: string }> {
   const { supabase, user, role } = await requireAdmin();
-  if (!user || role !== "admin") return { error: "No autorizado." };
+  if (!user || (role !== "admin" && role !== "operator")) return { error: "No autorizado." };
 
   const validationError = validateCustomer(input);
   if (validationError) return { error: validationError };
@@ -650,13 +650,16 @@ export async function createManualOrder(
   const resolved = await resolveItems(input.items, true);
   if ("error" in resolved) return resolved;
 
-  const locationResult = await validateLocationSelection(input.locationId, {
+  const customerInput: Omit<CreateOrderInput, "items"> = {
+    ...input,
+    locationId: input.deliveryMethod === "recoger" ? input.locationId : undefined,
+  };
+  const locationResult = await validateLocationSelection(customerInput.locationId, {
     allowInactive: true,
-    requireWhenAvailable: false,
+    requireWhenAvailable: customerInput.deliveryMethod === "recoger",
   });
   if ("error" in locationResult) return locationResult;
 
-  const customerInput: Omit<CreateOrderInput, "items"> = input;
   const crm = await prepareCrmContact(customerInput, "asesor");
   const rpcInput = buildRpcInput(customerInput, resolved.items, crm);
   const { data, error } = await supabase.rpc("admin_create_order_with_items", rpcInput);

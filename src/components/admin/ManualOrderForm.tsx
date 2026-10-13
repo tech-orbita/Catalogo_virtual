@@ -214,6 +214,11 @@ export function ManualOrderForm({
     });
   }
 
+  function chooseDeliveryMethod(method: DeliveryMethod) {
+    setDeliveryMethod(method);
+    if (method === "domicilio") setLocationId("");
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitting(true);
@@ -234,7 +239,7 @@ export function ManualOrderForm({
       customerCedula,
       customerPhone,
       customerEmail,
-      locationId: locationId || undefined,
+      locationId: deliveryMethod === "recoger" ? locationId || undefined : undefined,
       deliveryMethod,
       address: deliveryMethod === "domicilio" ? address : undefined,
       neighborhood: deliveryMethod === "domicilio" ? neighborhood : undefined,
@@ -389,7 +394,7 @@ export function ManualOrderForm({
               <button
                 key={method}
                 type="button"
-                onClick={() => setDeliveryMethod(method)}
+                onClick={() => chooseDeliveryMethod(method)}
                 className={clsx(
                   "rounded-xl border px-3 py-2.5 text-sm font-semibold",
                   deliveryMethod === method
@@ -402,7 +407,7 @@ export function ManualOrderForm({
             ))}
           </div>
 
-          {locations.length > 0 && (
+          {deliveryMethod === "recoger" && locations.length > 0 && (
             <label className="mt-4 block text-xs font-medium text-slate-600">
               Sede
               <select

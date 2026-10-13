@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, ExternalLink, LockKeyhole, ShieldCheck } from "lucide-react";
+import { ArrowRight, ExternalLink, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { login } from "@/actions/auth";
 import { useToast } from "@/components/ui/Toast";
 
@@ -10,6 +10,7 @@ export default function AdminLoginPage() {
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   async function handleSubmit(formData: FormData) {
     setSubmitting(true);
@@ -81,18 +82,32 @@ export default function AdminLoginPage() {
                   />
                 </label>
 
-                <label className="block text-sm font-medium text-slate-700">
-                  Contraseña
-                  <input
-                    required
-                    type="password"
-                    name="password"
-                    minLength={6}
-                    autoComplete="current-password"
-                    placeholder="Tu contraseña"
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-base text-slate-950 outline-none transition focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/15"
-                  />
-                </label>
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                    Contraseña
+                  </label>
+                  <div className="relative mt-2">
+                    <input
+                      required
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      name="password"
+                      minLength={6}
+                      autoComplete="current-password"
+                      placeholder="Tu contraseña"
+                      className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-3.5 pr-12 text-base text-slate-950 outline-none transition focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/15"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((value) => !value)}
+                      aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                      aria-pressed={showPassword}
+                      className="absolute inset-y-0 right-0 flex w-12 items-center justify-center rounded-r-xl text-slate-400 transition hover:text-orbita-navy focus:outline-none focus-visible:text-orbita-cyan-dark"
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {error && (

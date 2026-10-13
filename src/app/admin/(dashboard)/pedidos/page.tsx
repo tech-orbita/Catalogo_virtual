@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getAdminOrders } from "@/lib/data/admin-orders";
+import { getAllStoreLocations } from "@/lib/data/queries";
 import { AdminTopbar } from "@/components/admin/AdminTopbar";
 import { OrdersTable } from "@/components/admin/OrdersTable";
 import type { OrderStatus, PaymentStatus } from "@/lib/types";
@@ -10,18 +11,24 @@ import { getDashboardRole } from "@/lib/auth/access";
 export default async function PedidosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ search?: string; estado?: OrderStatus; pago?: PaymentStatus; page?: string }>;
+  searchParams: Promise<{ search?: string; estado?: OrderStatus; pago?: PaymentStatus; sede?: string; page?: string }>;
 }) {
   const params = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const canManageOrders = getDashboardRole(user) === "admin";
-  const { orders, total, page, totalPages } = await getAdminOrders({
-    search: params.search,
-    status: params.estado,
-    paymentStatus: params.pago,
-    page: params.page ? Number(params.page) : 1,
-  });
+  const role = getDashboardRole(user);
+  const canManageOrders = role === "admin" || role === "operator";
+  const [locations, orderResult] = await Promise.all([
+    getAllStoreLocations(),
+    getAdminOrders({
+      search: params.search,
+      status: params.estado,
+      paymentStatus: params.pago,
+      locationId: params.sede,
+      page: params.page ? Number(params.page) : 1,
+    }),
+  ]);
+  const { orders, total, page, totalPages } = orderResult;
 
   return (
     <>
@@ -38,7 +45,7 @@ export default async function PedidosPage({
         ) : null}
       />
       <div className="admin-enter p-4 sm:p-6">
-        <OrdersTable orders={orders} total={total} page={page} totalPages={totalPages} />
+        <OrdersTable orders={orders} total={total} page={page} totalPages={totalPages} locations={locations} />
       </div>
     </>
   );

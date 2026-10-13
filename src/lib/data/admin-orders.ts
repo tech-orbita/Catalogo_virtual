@@ -7,6 +7,7 @@ export async function getAdminOrders(options: {
   search?: string;
   status?: OrderStatus;
   paymentStatus?: PaymentStatus;
+  locationId?: string;
   page?: number;
 }) {
   const supabase = await createClient();
@@ -22,6 +23,8 @@ export async function getAdminOrders(options: {
 
   if (options.status) query = query.eq("status", options.status);
   if (options.paymentStatus) query = query.eq("payment_status", options.paymentStatus);
+  if (options.locationId === "sin_sede") query = query.is("location_id", null);
+  else if (options.locationId) query = query.eq("location_id", options.locationId);
   if (options.search) {
     const search = options.search.trim();
     const asNumber = Number(search);
@@ -34,7 +37,8 @@ export async function getAdminOrders(options: {
     }
   }
 
-  const { data, count } = await query;
+  const { data, count, error } = await query;
+  if (error) throw new Error(`No se pudieron cargar los pedidos: ${error.message}`);
   const total = count ?? 0;
   return {
     orders: (data ?? []) as Order[],
@@ -46,10 +50,12 @@ export async function getAdminOrders(options: {
 
 export async function getAdminOrderById(id: string) {
   const supabase = await createClient();
-  const [{ data: order }, { data: items }] = await Promise.all([
+  const [{ data: order, error: orderError }, { data: items, error: itemsError }] = await Promise.all([
     supabase.from("orders").select("*").eq("id", id).maybeSingle(),
     supabase.from("order_items").select("*").eq("order_id", id),
   ]);
+  const error = orderError ?? itemsError;
+  if (error) throw new Error(`No se pudo cargar el pedido: ${error.message}`);
 
   if (!order) return null;
   return { ...(order as Order), items: (items ?? []) as OrderItem[] };

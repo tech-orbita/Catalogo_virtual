@@ -7,17 +7,20 @@ import { Search } from "lucide-react";
 import { formatCOP } from "@/lib/currency";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/lib/types";
 import type { Order, OrderStatus, PaymentStatus } from "@/lib/types";
+import type { StoreLocation } from "@/lib/types";
 
 export function OrdersTable({
   orders,
   total,
   page,
   totalPages,
+  locations,
 }: {
   orders: Order[];
   total: number;
   page: number;
   totalPages: number;
+  locations: StoreLocation[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -67,6 +70,19 @@ export function OrdersTable({
             <option key={value} value={value}>
               {label}
             </option>
+          ))}
+        </select>
+
+        <select
+          defaultValue={searchParams.get("sede") ?? ""}
+          onChange={(e) => updateParam("sede", e.target.value)}
+          className="rounded-lg border border-black/10 px-3 py-2.5 text-sm"
+          aria-label="Filtrar por sede de recogida"
+        >
+          <option value="">Todas las sedes</option>
+          <option value="sin_sede">Domicilio / sin sede</option>
+          {locations.map((location) => (
+            <option key={location.id} value={location.id}>{location.name}</option>
           ))}
         </select>
 
