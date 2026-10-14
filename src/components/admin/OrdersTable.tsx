@@ -77,10 +77,10 @@ export function OrdersTable({
           defaultValue={searchParams.get("sede") ?? ""}
           onChange={(e) => updateParam("sede", e.target.value)}
           className="rounded-lg border border-black/10 px-3 py-2.5 text-sm"
-          aria-label="Filtrar por sede de recogida"
+          aria-label="Filtrar por proveniencia"
         >
-          <option value="">Todas las sedes</option>
-          <option value="sin_sede">Domicilio / sin sede</option>
+          <option value="">Todas las proveniencias</option>
+          <option value="sin_sede">Catálogo virtual / dashboard</option>
           {locations.map((location) => (
             <option key={location.id} value={location.id}>{location.name}</option>
           ))}
@@ -124,7 +124,7 @@ export function OrdersTable({
                 </td>
                 <td className="p-3">{order.customer_name}</td>
                 <td className="p-3 text-black/50">
-                  {order.order_source === "asesor" ? "Asesor" : "Catálogo"}
+                  {order.sales_origin_label || (order.order_source === "asesor" ? "Asesor" : "Catálogo virtual")}
                 </td>
                 <td className="p-3 text-black/50">
                   <span className="capitalize">{order.delivery_method}</span>

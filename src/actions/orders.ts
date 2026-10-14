@@ -7,6 +7,7 @@ import { getDashboardRole } from "@/lib/auth/access";
 import {
   createCrmContactNote,
   CrmConfigurationError,
+  getCrmContactTags,
   syncCrmOrderCreatedOpportunities,
   syncCrmProductOpportunityStage,
   triggerCrmNewOrderNotificationWorkflow,
@@ -116,6 +117,12 @@ type ValidatedLocation = {
   whatsappNumber: string;
 };
 
+type SalesOrigin = {
+  type: "store_location" | "catalogo_virtual";
+  locationId: string | null;
+  label: string;
+};
+
 const ORDER_STATUSES = new Set(Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]);
 const PAYMENT_STATUSES = new Set(Object.keys(PAYMENT_STATUS_LABELS) as PaymentStatus[]);
 
@@ -130,7 +137,10 @@ function joinWarnings(...warnings: Array<string | null | undefined>) {
 
 async function syncCreatedOrderOpportunities(input: {
   contactId: string | null;
+  customerName: string;
   orderNumber: number;
+  source: "catalogo" | "manual";
+  salesOriginLabel: string;
   total: number;
   includeAgentPipeline: boolean;
 }) {
@@ -139,13 +149,18 @@ async function syncCreatedOrderOpportunities(input: {
     if (input.includeAgentPipeline) {
       await syncCrmOrderCreatedOpportunities({
         contactId: input.contactId,
+        customerName: input.customerName,
         orderNumber: input.orderNumber,
+        salesOriginLabel: input.salesOriginLabel,
         total: input.total,
       });
     } else {
       await syncCrmProductOpportunityStage({
         contactId: input.contactId,
+        customerName: input.customerName,
         orderNumber: input.orderNumber,
+        source: input.source,
+        salesOriginLabel: input.salesOriginLabel,
         total: input.total,
         stage: "pedido_realizado",
       });
@@ -373,6 +388,115 @@ async function prepareCrmContact(
   }
 }
 
+async function resolveCatalogSalesOrigin(
+  contactId: string | null
+): Promise<{ origin: SalesOrigin; warning: string | null }> {
+  const fallback: SalesOrigin = {
+    type: "catalogo_virtual",
+    locationId: null,
+    label: "Catálogo virtual",
+  };
+  if (!contactId) return { origin: fallback, warning: null };
+
+  try {
+    const tags = await getCrmContactTags(contactId);
+    const whatsappTag = [...tags]
+      .reverse()
+      .find((tag) => /^wa\s*:/i.test(tag.trim()));
+    if (!whatsappTag) return { origin: fallback, warning: null };
+
+    const tagPhone = whatsappTag.replace(/^wa\s*:/i, "").trim();
+    const normalizedTagPhone = normalizePhoneForCrm(tagPhone);
+    if (!normalizedTagPhone) return { origin: fallback, warning: null };
+
+    const supabase = await createClient();
+    const { data: locations, error } = await supabase
+      .from("store_locations")
+      .select("id, name, whatsapp_number");
+    if (error) throw error;
+
+    const location = locations?.find(
+      (candidate) =>
+        normalizePhoneForCrm(candidate.whatsapp_number) === normalizedTagPhone
+    );
+    if (!location) return { origin: fallback, warning: null };
+
+    return {
+      origin: {
+        type: "store_location",
+        locationId: location.id,
+        label: location.name,
+      },
+      warning: null,
+    };
+  } catch (error) {
+    return {
+      origin: fallback,
+      warning: `No se pudo consultar la proveniencia en el CRM; se registró Catálogo virtual: ${errorMessage(error)}`,
+    };
+  }
+}
+
+async function resolveDashboardSalesOrigin(
+  user: { app_metadata?: Record<string, unknown> },
+  selectedLocation: ValidatedLocation | null
+): Promise<{ origin: SalesOrigin; warning: string | null }> {
+  const fallback: SalesOrigin = {
+    type: "catalogo_virtual",
+    locationId: null,
+    label: "Catálogo virtual",
+  };
+  const metadataLocationId =
+    typeof user.app_metadata?.store_location_id === "string"
+      ? user.app_metadata.store_location_id.trim()
+      : "";
+
+  if (!metadataLocationId && !selectedLocation) {
+    return { origin: fallback, warning: null };
+  }
+  if (!metadataLocationId && selectedLocation) {
+    return {
+      origin: {
+        type: "store_location",
+        locationId: selectedLocation.id,
+        label: selectedLocation.name,
+      },
+      warning: null,
+    };
+  }
+
+  if (selectedLocation?.id === metadataLocationId) {
+    return {
+      origin: {
+        type: "store_location",
+        locationId: selectedLocation.id,
+        label: selectedLocation.name,
+      },
+      warning: null,
+    };
+  }
+
+  const locationResult = await validateLocationSelection(metadataLocationId, {
+    allowInactive: true,
+    requireWhenAvailable: false,
+  });
+  if ("error" in locationResult || !locationResult.location) {
+    return {
+      origin: fallback,
+      warning: "La sede configurada para el usuario no es válida; se registró Catálogo virtual.",
+    };
+  }
+
+  return {
+    origin: {
+      type: "store_location",
+      locationId: locationResult.location.id,
+      label: locationResult.location.name,
+    },
+    warning: null,
+  };
+}
+
 function toRpcItems(items: ResolvedOrderItem[]) {
   return items.map((item) => ({
     product_id: item.productId,
@@ -388,7 +512,8 @@ function toRpcItems(items: ResolvedOrderItem[]) {
 function buildRpcInput(
   input: Omit<CreateOrderInput, "items">,
   items: ResolvedOrderItem[],
-  crm: CrmSyncState
+  crm: CrmSyncState,
+  salesOrigin: SalesOrigin
 ) {
   const subtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
   return {
@@ -409,6 +534,9 @@ function buildRpcInput(
     p_ghl_contact_id: crm.contactId,
     p_ghl_sync_status: crm.status,
     p_ghl_sync_error: crm.error,
+    p_sales_origin_type: salesOrigin.type,
+    p_sales_origin_location_id: salesOrigin.locationId,
+    p_sales_origin_label: salesOrigin.label,
     p_items: toRpcItems(items),
   };
 }
@@ -419,6 +547,7 @@ async function attachOrderNote(input: {
   source: "catalogo" | "asesor";
   customer: Omit<CreateOrderInput, "items">;
   locationName: string | null;
+  salesOriginLabel: string;
   items: ResolvedOrderItem[];
   subtotal: number;
 }) {
@@ -442,6 +571,7 @@ async function attachOrderNote(input: {
         city: input.customer.city,
         department: input.customer.department,
         locationName: input.locationName,
+        salesOriginLabel: input.salesOriginLabel,
         notes: input.customer.notes,
         privacyAccepted: input.customer.privacyAccepted,
         items: input.items.map((item) => ({
@@ -466,8 +596,10 @@ async function sendCreatedOrderNotifications(input: {
   orderNumber: number;
   customer: Omit<CreateOrderInput, "items">;
   location: ValidatedLocation | null;
+  salesOriginLabel: string;
   items: ResolvedOrderItem[];
   subtotal: number;
+  sendCustomerConfirmation?: boolean;
 }) {
   const messageInput = {
     orderNumber: input.orderNumber,
@@ -482,6 +614,7 @@ async function sendCreatedOrderNotifications(input: {
     city: input.customer.city,
     department: input.customer.department,
     locationName: input.location?.name ?? null,
+    salesOriginLabel: input.salesOriginLabel,
     notes: input.customer.notes,
     privacyAccepted: input.customer.privacyAccepted,
     items: input.items.map((item) => ({
@@ -496,7 +629,7 @@ async function sendCreatedOrderNotifications(input: {
   const warnings: string[] = [];
   let customerConfirmationSent = false;
 
-  if (input.contactId) {
+  if (input.sendCustomerConfirmation !== false && input.contactId) {
     try {
       await triggerCrmOrderConfirmationWorkflow(
         input.contactId,
@@ -506,7 +639,7 @@ async function sendCreatedOrderNotifications(input: {
     } catch (error) {
       warnings.push(`No se pudo enviar la confirmación al cliente: ${errorMessage(error)}`);
     }
-  } else {
+  } else if (input.sendCustomerConfirmation !== false) {
     warnings.push("No se pudo enviar la confirmación porque el contacto no quedó sincronizado.");
   }
 
@@ -589,7 +722,9 @@ export async function createOrder(
   if ("error" in locationResult) return locationResult;
 
   const crm = await prepareCrmContact(customerInput, "catalogo");
-  const rpcInput = buildRpcInput(customerInput, resolved.items, crm);
+  const salesOriginResult = await resolveCatalogSalesOrigin(crm.contactId);
+  const salesOrigin = salesOriginResult.origin;
+  const rpcInput = buildRpcInput(customerInput, resolved.items, crm, salesOrigin);
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("create_order_with_items", rpcInput);
@@ -605,12 +740,16 @@ export async function createOrder(
     source: "catalogo",
     customer: customerInput,
     locationName: order.location_name ?? null,
+    salesOriginLabel: salesOrigin.label,
     items: resolved.items,
     subtotal: rpcInput.p_subtotal,
   });
   const opportunityWarning = await syncCreatedOrderOpportunities({
     contactId: crm.contactId,
+    customerName: customerInput.customerName,
     orderNumber: order.order_number,
+    source: "catalogo",
+    salesOriginLabel: salesOrigin.label,
     total: rpcInput.p_subtotal,
     includeAgentPipeline: true,
   });
@@ -619,6 +758,7 @@ export async function createOrder(
     orderNumber: order.order_number,
     customer: customerInput,
     location: locationResult.location,
+    salesOriginLabel: salesOrigin.label,
     items: resolved.items,
     subtotal: rpcInput.p_subtotal,
   });
@@ -634,7 +774,13 @@ export async function createOrder(
     locationAddress: order.location_address ?? null,
     crmSynced: crm.status === "sincronizado",
     customerConfirmationSent: notification.customerConfirmationSent,
-    warning: joinWarnings(crm.error, noteWarning, opportunityWarning, notification.warning),
+    warning: joinWarnings(
+      crm.error,
+      salesOriginResult.warning,
+      noteWarning,
+      opportunityWarning,
+      notification.warning
+    ),
   };
 }
 
@@ -661,7 +807,9 @@ export async function createManualOrder(
   if ("error" in locationResult) return locationResult;
 
   const crm = await prepareCrmContact(customerInput, "asesor");
-  const rpcInput = buildRpcInput(customerInput, resolved.items, crm);
+  const salesOriginResult = await resolveDashboardSalesOrigin(user, locationResult.location);
+  const salesOrigin = salesOriginResult.origin;
+  const rpcInput = buildRpcInput(customerInput, resolved.items, crm, salesOrigin);
   const { data, error } = await supabase.rpc("admin_create_order_with_items", rpcInput);
 
   if (error || !data || data.length === 0) {
@@ -676,14 +824,28 @@ export async function createManualOrder(
     source: "asesor",
     customer: customerInput,
     locationName: location?.name ?? null,
+    salesOriginLabel: salesOrigin.label,
     items: resolved.items,
     subtotal: rpcInput.p_subtotal,
   });
   const opportunityWarning = await syncCreatedOrderOpportunities({
     contactId: crm.contactId,
+    customerName: customerInput.customerName,
     orderNumber: order.order_number,
+    source: "manual",
+    salesOriginLabel: salesOrigin.label,
     total: rpcInput.p_subtotal,
     includeAgentPipeline: false,
+  });
+  const notification = await sendCreatedOrderNotifications({
+    contactId: crm.contactId,
+    orderNumber: order.order_number,
+    customer: customerInput,
+    location,
+    salesOriginLabel: salesOrigin.label,
+    items: resolved.items,
+    subtotal: rpcInput.p_subtotal,
+    sendCustomerConfirmation: false,
   });
 
   revalidatePath("/admin");
@@ -697,7 +859,13 @@ export async function createManualOrder(
     locationAddress: location?.address ?? null,
     crmSynced: crm.status === "sincronizado",
     customerConfirmationSent: false,
-    warning: joinWarnings(crm.error, noteWarning, opportunityWarning),
+    warning: joinWarnings(
+      crm.error,
+      salesOriginResult.warning,
+      noteWarning,
+      opportunityWarning,
+      notification.warning
+    ),
   };
 }
 
@@ -735,7 +903,10 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
 
     await syncCrmProductOpportunityStage({
       contactId,
+      customerName: order.customer_name,
       orderNumber: order.order_number,
+      source: order.order_source === "asesor" ? "manual" : "catalogo",
+      salesOriginLabel: order.sales_origin_label,
       total: Number(order.total),
       stage: status,
     });
@@ -903,7 +1074,10 @@ export async function triggerOrderQuoteWorkflow(
     try {
       await syncCrmProductOpportunityStage({
         contactId,
+        customerName: order.customer_name,
         orderNumber: order.order_number,
+        source: order.order_source === "asesor" ? "manual" : "catalogo",
+        salesOriginLabel: order.sales_origin_label,
         total,
         stage: nextStatus,
       });

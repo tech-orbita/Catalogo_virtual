@@ -128,6 +128,9 @@ export interface Order {
   location_whatsapp_snapshot?: string | null;
   order_source?: "catalogo" | "asesor";
   created_by_email?: string | null;
+  sales_origin_type?: "store_location" | "catalogo_virtual";
+  sales_origin_location_id?: string | null;
+  sales_origin_label?: string;
   ghl_contact_id?: string | null;
   ghl_sync_status?: "pendiente" | "sin_configurar" | "sincronizado" | "error";
   ghl_sync_error?: string | null;

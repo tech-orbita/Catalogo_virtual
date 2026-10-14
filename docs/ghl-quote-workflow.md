@@ -75,7 +75,7 @@ f60ba650-14ca-451d-87c4-6b3ab6eeb311
 {{contact.confirmacion_nuevo_pedido}}
 ```
 
-El campo ya contiene saludo, número de solicitud, modalidad de entrega, sede o dirección, productos, subtotal y aviso de revisión por un asesor. No agregues otro saludo ni dupliques el contenido dentro del workflow.
+El campo ya contiene un resumen compacto para que el cliente confirme nombre, teléfono, cédula, correo, modalidad y datos de entrega, productos, subtotal y notas. También indica cómo reportar un error y avisa que un asesor confirmará disponibilidad y enviará la cotización final. No agregues otro saludo ni dupliques el contenido dentro del workflow.
 
 ## 4. Workflow: notificar a la sede
 

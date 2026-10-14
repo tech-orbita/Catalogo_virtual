@@ -103,6 +103,9 @@ export function OrderDetail({
         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
           {order.order_source === "asesor" ? "Creado por asesor" : "Catálogo web"}
         </span>
+        <span className="rounded-full bg-cyan-50 px-2.5 py-1 text-xs font-medium text-cyan-800">
+          Proveniencia: {order.sales_origin_label || "Catálogo virtual"}
+        </span>
       </div>
 
       {feedback ? (

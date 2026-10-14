@@ -19,6 +19,7 @@ type OrderMessageInput = {
   city?: string | null;
   department?: string | null;
   locationName?: string | null;
+  salesOriginLabel?: string | null;
   notes?: string | null;
   privacyAccepted?: boolean;
   items: Array<{
@@ -42,41 +43,56 @@ function appendOrderItems(lines: string[], items: OrderMessageInput["items"]) {
 
 export function buildOrderReceivedMessage(order: OrderMessageInput): string {
   const lines = [
-    `Hola ${order.customerName}, recibimos tu solicitud #${order.orderNumber}.`,
+    `*Solicitud #${order.orderNumber} recibida*`,
+    `Hola ${order.customerName}. Confirma que estos datos sean correctos:`,
     "",
-    "Datos recibidos:",
-    `Entrega: ${order.deliveryMethod === "domicilio" ? "Domicilio" : "Recoger en tienda"}`,
+    "*Tus datos*",
+    `*Nombre:* ${order.customerName}`,
+    `*Teléfono:* ${order.customerPhone}`,
+    `*Cédula:* ${order.customerCedula}`,
   ];
 
-  if (order.locationName) lines.push(`Sede: ${order.locationName}`);
-  if (order.address) lines.push(`Dirección: ${order.address}`);
-  if (order.neighborhood) lines.push(`Barrio: ${order.neighborhood}`);
-  if (order.addressDetails) lines.push(`Indicaciones: ${order.addressDetails}`);
+  if (order.customerEmail) lines.push(`*Correo:* ${order.customerEmail}`);
+  lines.push(
+    `*Entrega:* ${order.deliveryMethod === "domicilio" ? "Domicilio" : "Recoger en tienda"}`
+  );
+  if (order.locationName) lines.push(`*Sede:* ${order.locationName}`);
+  if (order.address) lines.push(`*Dirección:* ${order.address}`);
+  if (order.neighborhood) lines.push(`*Barrio:* ${order.neighborhood}`);
+  if (order.addressDetails) lines.push(`*Indicaciones:* ${order.addressDetails}`);
   if (order.city || order.department) {
-    lines.push(`Ciudad / departamento: ${[order.city, order.department].filter(Boolean).join(", ")}`);
+    lines.push(`*Ciudad / departamento:* ${[order.city, order.department].filter(Boolean).join(", ")}`);
   }
 
-  lines.push("", "Productos:");
-  appendOrderItems(lines, order.items);
-  lines.push("", `Subtotal de productos: ${formatCOP(order.subtotal)}`);
+  lines.push("", "*Productos*");
+  for (const item of order.items) {
+    const label = item.variantLabel
+      ? `${item.productName} (${item.variantLabel})`
+      : item.productName;
+    lines.push(`• ${label} ×${item.quantity}: *${formatCOP(item.subtotal)}*`);
+  }
+  lines.push(`*Subtotal:* ${formatCOP(order.subtotal)}`);
+  if (order.notes) lines.push(`*Notas:* ${order.notes}`);
 
   if (order.deliveryMethod === "domicilio") {
     lines.push(
       "",
-      "Políticas de domicilio:",
-      `- Solo atendemos domicilios para pedidos de productos mayores a ${formatCOP(DELIVERY_MINIMUM_SUBTOTAL)}.`,
-      "- El valor final del domicilio se informará en la cotización.",
-      "- Los envíos fuera de Bogotá o Soacha se cotizan por separado mediante una transportadora."
+      `_El domicilio se cotiza aparte. Aplica para productos desde ${formatCOP(DELIVERY_MINIMUM_SUBTOTAL)}; fuera de Bogotá o Soacha se cotiza transportadora._`
     );
   }
 
-  lines.push("", "Un asesor revisará disponibilidad y te enviará la cotización final.");
+  lines.push(
+    "",
+    "Revisa la información. Si encuentras un error, respóndenos por este chat.",
+    "Un asesor confirmará disponibilidad y te enviará la cotización final."
+  );
   return lines.join("\n");
 }
 
 export function buildOperationalOrderAlert(order: OrderMessageInput): string {
   const lines = [
-    `Nuevo pedido #${order.orderNumber} desde el catálogo`,
+    `Nuevo pedido #${order.orderNumber}`,
+    `Proveniencia: ${order.salesOriginLabel || "Catálogo virtual"}`,
     `Cliente: ${order.customerName}`,
     `Teléfono: ${order.customerPhone}`,
     `Cédula: ${order.customerCedula}`,
@@ -212,6 +228,7 @@ export function buildOrderCrmNote(order: {
   city?: string | null;
   department?: string | null;
   locationName?: string | null;
+  salesOriginLabel?: string | null;
   notes?: string | null;
   privacyAccepted?: boolean;
   items: Array<{
@@ -227,6 +244,7 @@ export function buildOrderCrmNote(order: {
   const lines = [
     `Solicitud #${order.orderNumber}`,
     `Origen: ${order.source === "asesor" ? "Creada por asesor" : "Catálogo web"}`,
+    `Proveniencia: ${order.salesOriginLabel || "Catálogo virtual"}`,
     "Estado: Pendiente por cotizar",
     "",
     `Cliente: ${order.customerName}`,

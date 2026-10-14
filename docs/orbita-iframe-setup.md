@@ -109,6 +109,10 @@ El número remitente, el proveedor y los botones no se envían por la API de con
 
 Al crear un pedido desde el catálogo, la app guarda el resumen completo como nota del contacto, actualiza `contact.confirmacion_nuevo_pedido` y activa el workflow publicado de confirmación del cliente. Para recoger, toma `store_locations.whatsapp_number`, crea o actualiza el contacto operativo de la sede, actualiza `contact.notificacion_nuevo_pedido` y vuelve a añadirlo al workflow publicado de notificación. Para domicilio no acepta sede desde el navegador: usa el contacto del centro logístico configurado en `ORBITA_LOGISTICS_WHATSAPP_NUMBER`. Ambos workflows deben permitir reingreso para recibir pedidos sucesivos.
 
+Las oportunidades usan el nombre del cliente, una referencia de cuatro dígitos y la proveniencia: `Nombre del cliente · CT #0026 · Venecia` para un contacto cuyo tag `wa:` coincide con la sede Venecia, y `Nombre del cliente · Manual #0026 · Venecia` para un pedido creado desde el dashboard por un usuario asociado a esa sede. Nunca se incluye el correo del usuario. Si no hay una sede asociada, el contacto es nuevo, no tiene tag `wa:` o el número del tag no coincide con ninguna sede, la proveniencia queda como `Catálogo virtual`. El mismo nombre se conserva al cambiar la oportunidad de etapa o reenviar la cotización.
+
+La proveniencia se guarda como una fotografía histórica en el pedido y aparece en el aviso operativo. No cambia si después se modifican los tags del contacto en el CRM. El filtro de sede de la pantalla de pedidos usa esta proveniencia comercial y no la sede logística de recogida.
+
 La configuración exacta del workflow, la sintaxis de goGHL.ai y las ramas de aprobación/rechazo está en `docs/ghl-quote-workflow.md`.
 
 Antes de operar en producción, aplica también `supabase/migrations/20261006172937_order_quote_builder.sql` y `supabase/migrations/20261006180732_allow_delivery_orders_without_store_location.sql`, vuelve a desplegar las variables y prueba con un contacto autorizado. Una activación exitosa confirma que GHL aceptó el contacto en el workflow; no confirma que goGHL.ai haya entregado el mensaje.

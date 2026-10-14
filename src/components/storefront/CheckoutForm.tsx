@@ -127,8 +127,8 @@ export function CheckoutForm({
       variant: "success",
       title: `Pedido #${result.orderNumber} recibido`,
       description: result.locationName
-        ? `Lo atenderá la sede ${result.locationName}.`
-        : "Un asesor te enviará la cotización.",
+        ? `La sede ${result.locationName} revisará la disponibilidad de los productos.`
+        : "Un asesor revisará la disponibilidad de los productos.",
     });
   }
 
@@ -140,11 +140,12 @@ export function CheckoutForm({
         </div>
         <h1 className="text-xl font-semibold">¡Pedido #{confirmation.orderNumber} recibido!</h1>
         <p className="mt-2 text-sm text-[#545454]/65">
-          Quedó pendiente por cotizar. Un asesor revisará los artículos y te enviará la cotización.
+          Tu pedido será revisado por el asesor encargado. Muy pronto recibirás la confirmación según
+          la disponibilidad de los productos.
         </p>
         {confirmation.customerConfirmationSent && (
           <p className="mt-2 text-sm text-[#545454]/65">
-            También enviamos a tu teléfono la confirmación con los datos recibidos.
+            También enviamos a tu WhatsApp un resumen de los datos para que los verifiques.
           </p>
         )}
         {confirmation.locationName && (

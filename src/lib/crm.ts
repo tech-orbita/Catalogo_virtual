@@ -52,7 +52,7 @@ export interface CrmContactInput {
 }
 
 interface CrmContactResponse {
-  contact?: { id?: string };
+  contact?: { id?: string; tags?: string[] };
 }
 
 interface CrmNoteResponse {
@@ -339,8 +339,18 @@ async function updateCrmOpportunity(
   }
 }
 
-function productOpportunityName(orderNumber: number) {
-  return `Pedido catálogo #${orderNumber}`;
+type CrmOrderSource = "catalogo" | "manual";
+
+function productOpportunityName(input: {
+  customerName: string;
+  orderNumber: number;
+  source: CrmOrderSource;
+  salesOriginLabel?: string | null;
+}) {
+  const reference = input.orderNumber.toString().padStart(4, "0");
+  const sourceLabel = input.source === "catalogo" ? "CT" : "Manual";
+  const origin = input.salesOriginLabel?.trim();
+  return `${input.customerName.trim()} · ${sourceLabel} #${reference}${origin ? ` · ${origin}` : ""}`;
 }
 
 function waitForCrmIndex(delayMs: number) {
@@ -349,13 +359,16 @@ function waitForCrmIndex(delayMs: number) {
 
 async function ensureProductOpportunity(input: {
   contactId: string;
+  customerName: string;
   orderNumber: number;
+  source: CrmOrderSource;
+  salesOriginLabel?: string | null;
   total: number;
   stage: CrmOrderStage;
 }) {
   const stageName = PRODUCT_STAGE_NAMES[input.stage];
   const pipeline = await resolveCrmPipeline(PRODUCTS_PIPELINE_NAME, [stageName]);
-  const opportunityName = productOpportunityName(input.orderNumber);
+  const opportunityName = productOpportunityName(input);
   const opportunities = await searchCrmOpportunities(input.contactId, pipeline.id);
   const existing =
     opportunities.find(
@@ -410,9 +423,17 @@ async function ensureProductOpportunity(input: {
 
 export async function syncCrmOrderCreatedOpportunities(input: {
   contactId: string;
+  customerName: string;
   orderNumber: number;
+  salesOriginLabel?: string | null;
   total: number;
 }) {
+  const opportunityName = productOpportunityName({
+    customerName: input.customerName,
+    orderNumber: input.orderNumber,
+    source: "catalogo",
+    salesOriginLabel: input.salesOriginLabel,
+  });
   const agentPipeline = await resolveCrmPipeline(AGENT_PIPELINE_NAME, [AGENT_CATALOG_STAGE_NAME]);
   const agentOpportunities = await searchCrmOpportunities(input.contactId, agentPipeline.id);
   const activeAgentOpportunity =
@@ -423,22 +444,30 @@ export async function syncCrmOrderCreatedOpportunities(input: {
     await updateCrmOpportunity(activeAgentOpportunity.id, {
       pipelineId: agentPipeline.id,
       stageId: agentStageId,
+      name: opportunityName,
     });
   } else {
     await createCrmOpportunity({
       contactId: input.contactId,
       pipelineId: agentPipeline.id,
       stageId: agentStageId,
-      name: "Pedido por catálogo virtual",
+      name: opportunityName,
     });
   }
 
-  await ensureProductOpportunity({ ...input, stage: "pedido_realizado" });
+  await ensureProductOpportunity({
+    ...input,
+    source: "catalogo",
+    stage: "pedido_realizado",
+  });
 }
 
 export async function syncCrmProductOpportunityStage(input: {
   contactId: string;
+  customerName: string;
   orderNumber: number;
+  source: CrmOrderSource;
+  salesOriginLabel?: string | null;
   total: number;
   stage: CrmOrderStage;
 }) {
@@ -502,6 +531,14 @@ export async function upsertCrmContact(input: CrmContactInput): Promise<string> 
     throw new Error("El CRM no confirmó la actualización completa del contacto.");
   }
   return contactId;
+}
+
+export async function getCrmContactTags(contactId: string): Promise<string[]> {
+  const response = await crmRequest<CrmContactResponse>(
+    `/contacts/${encodeURIComponent(contactId)}`,
+    { method: "GET" }
+  );
+  return Array.isArray(response.contact?.tags) ? response.contact.tags : [];
 }
 
 export async function createCrmContactNote(contactId: string, title: string, body: string) {

@@ -23,8 +23,8 @@ export async function getAdminOrders(options: {
 
   if (options.status) query = query.eq("status", options.status);
   if (options.paymentStatus) query = query.eq("payment_status", options.paymentStatus);
-  if (options.locationId === "sin_sede") query = query.is("location_id", null);
-  else if (options.locationId) query = query.eq("location_id", options.locationId);
+  if (options.locationId === "sin_sede") query = query.is("sales_origin_location_id", null);
+  else if (options.locationId) query = query.eq("sales_origin_location_id", options.locationId);
   if (options.search) {
     const search = options.search.trim();
     const asNumber = Number(search);
