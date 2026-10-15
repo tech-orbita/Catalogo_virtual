@@ -22,7 +22,6 @@ import {
   buildOrderReceivedMessage,
   buildStructuredQuoteMessage,
   DELIVERY_MINIMUM_SUBTOTAL,
-  QUOTE_SUMMARY_MAX_LENGTH,
 } from "@/lib/messaging";
 import {
   ORDER_STATUS_LABELS,
@@ -1000,11 +999,6 @@ export async function triggerOrderQuoteWorkflow(
   const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
   const total = subtotal + deliveryFee;
   const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee, quoteNote);
-  if (quoteSummary.length > QUOTE_SUMMARY_MAX_LENGTH) {
-    return {
-      error: "La cotización es demasiado extensa. Reduce la cantidad de productos o simplifica las variantes.",
-    };
-  }
   const nextStatus: OrderStatus = availableItems.length > 0 ? "cotizacion_enviada" : "no_hubo_producto";
 
   let contactId: string;

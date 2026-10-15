@@ -1,10 +1,18 @@
 import { formatCOP } from "@/lib/currency";
 import type { DeliveryMethod, OrderQuoteItem, OrderWithItems } from "@/lib/types";
 
-/** Tope conservador para el campo multiline y el cuerpo del mensaje del proveedor. */
-export const QUOTE_SUMMARY_MAX_LENGTH = 1600;
 export const DELIVERY_MINIMUM_SUBTOTAL = 50_000;
 export const DATA_POLICY_URL = "https://Tyc.puntosorganic.com";
+
+function formatQuotePrice(value: number): string {
+  return `$ ${Math.round(value).toLocaleString("es-CO")}`;
+}
+
+function compactVariantLabel(value: string | null): string | null {
+  if (!value) return null;
+  const optionValue = value.includes(":") ? value.slice(value.indexOf(":") + 1).trim() : value.trim();
+  return optionValue.replace(/(\d+(?:[.,]\d+)?)\s+(ml|g|gr|kg|oz|l)\b/gi, "$1$2");
+}
 
 type OrderMessageInput = {
   orderNumber: number;
@@ -185,30 +193,33 @@ export function buildStructuredQuoteMessage(
   if (availableItems.length > 0) {
     lines.push("", "*Productos disponibles*");
     for (const item of availableItems) {
-      const label = item.variant_label
-        ? `${item.product_name} (${item.variant_label})`
+      const variantLabel = compactVariantLabel(item.variant_label);
+      const label = variantLabel
+        ? `${item.product_name} (${variantLabel})`
         : item.product_name;
-      lines.push(
-        `• ${label}\n  ${item.quantity} × ${formatCOP(item.unit_price)} = *${formatCOP(item.subtotal)}*`
-      );
+      lines.push(`- ${label}: ${formatQuotePrice(item.subtotal)}`);
     }
   }
 
   if (unavailableItems.length > 0) {
     lines.push("", "*Productos no disponibles*");
     for (const item of unavailableItems) {
-      const label = item.variant_label
-        ? `${item.product_name} (${item.variant_label})`
+      const variantLabel = compactVariantLabel(item.variant_label);
+      const label = variantLabel
+        ? `${item.product_name} (${variantLabel})`
         : item.product_name;
-      lines.push(`• ${label}`);
+      lines.push(`- ${label}`);
     }
   }
 
-  lines.push("", "*Resumen de valores*", `*Subtotal productos:* ${formatCOP(subtotal)}`);
   if (order.delivery_method === "domicilio") {
-    lines.push(`*Domicilio:* ${formatCOP(deliveryFee)}`);
+    lines.push(
+      "",
+      `*Resumen de valores:* Productos: ${formatQuotePrice(subtotal)} | Domicilio: ${formatQuotePrice(deliveryFee)} | *Total: ${formatQuotePrice(total)}*`
+    );
+  } else {
+    lines.push("", `*Total: ${formatQuotePrice(total)}*`);
   }
-  lines.push(`*TOTAL: ${formatCOP(total)}*`);
   if (quoteNote) lines.push("", "*Notas de la cotización*", quoteNote);
   lines.push("", "_Si no ves los botones, responde APROBAR o RECHAZAR._");
   return lines.join("\n");
