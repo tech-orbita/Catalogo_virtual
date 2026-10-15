@@ -1,5 +1,7 @@
 import "server-only";
 
+import type { CrmContactSearchResult } from "@/lib/types";
+
 const CRM_API_BASE_URL = "https://services.leadconnectorhq.com";
 const CRM_API_VERSION = "v3";
 const CRM_WORKFLOW_IDS = {
@@ -52,7 +54,33 @@ export interface CrmContactInput {
 }
 
 interface CrmContactResponse {
-  contact?: { id?: string; tags?: string[] };
+  contact?: CrmContactRecord;
+}
+
+interface CrmContactRecord {
+  id?: string;
+  locationId?: string;
+  contactName?: string;
+  name?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  address1?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  tags?: string[];
+  customFields?: Array<{ id?: string; key?: string; value?: unknown; fieldValue?: unknown }>;
+}
+
+interface CrmContactSearchResponse {
+  contacts?: CrmContactRecord[];
+}
+
+interface CrmCustomFieldsResponse {
+  customFields?: Array<{ id?: string; fieldKey?: string }>;
 }
 
 interface CrmNoteResponse {
@@ -134,6 +162,9 @@ type ResolvedCrmPipeline = {
 let pipelineCache:
   | { locationId: string; expiresAt: number; pipelines: CrmPipeline[] }
   | null = null;
+let identificationFieldCache:
+  | { locationId: string; expiresAt: number; id: string | null }
+  | null = null;
 
 function getConfig() {
   const apiKey = readEnv("ORBITA_CRM_API_KEY", "GHL_API_KEY");
@@ -153,6 +184,36 @@ function splitName(fullName: string) {
   return {
     firstName: parts[0] ?? fullName.trim(),
     lastName: parts.slice(1).join(" ") || undefined,
+  };
+}
+
+function buildCrmContactFields(input: CrmContactInput) {
+  const phone = normalizePhoneForCrm(input.phone, input.countryCallingCode);
+  if (!phone) throw new Error("El teléfono no es válido para sincronizarlo con el CRM.");
+
+  const { firstName, lastName } = splitName(input.name);
+  const customFields: Array<{ key: string; fieldValue: string }> = [];
+  if (input.cedula) {
+    customFields.push({
+      key: CRM_MESSAGE_FIELD_KEYS.identificationNumber,
+      fieldValue: input.cedula,
+    });
+  }
+
+  return {
+    name: input.name.trim(),
+    firstName,
+    lastName,
+    phone,
+    address1: input.address?.trim() || undefined,
+    city: input.city?.trim() || undefined,
+    state: input.department?.trim() || undefined,
+    country:
+      input.countryCode?.trim().toUpperCase() ||
+      readEnv("ORBITA_CRM_CONTACT_COUNTRY", "GHL_CONTACT_COUNTRY") ||
+      "CO",
+    source: input.source,
+    customFields: customFields.length > 0 ? customFields : undefined,
   };
 }
 
@@ -476,33 +537,7 @@ export async function syncCrmProductOpportunityStage(input: {
 
 export async function upsertCrmContact(input: CrmContactInput): Promise<string> {
   const { locationId } = getConfig();
-  const phone = normalizePhoneForCrm(input.phone, input.countryCallingCode);
-  if (!phone) throw new Error("El teléfono no es válido para sincronizarlo con el CRM.");
-
-  const { firstName, lastName } = splitName(input.name);
-  const customFields: Array<{ key: string; fieldValue: string }> = [];
-  if (input.cedula) {
-    customFields.push({
-      key: CRM_MESSAGE_FIELD_KEYS.identificationNumber,
-      fieldValue: input.cedula,
-    });
-  }
-
-  const contactFields = {
-    name: input.name.trim(),
-    firstName,
-    lastName,
-    phone,
-    address1: input.address?.trim() || undefined,
-    city: input.city?.trim() || undefined,
-    state: input.department?.trim() || undefined,
-    country:
-      input.countryCode?.trim().toUpperCase() ||
-      readEnv("ORBITA_CRM_CONTACT_COUNTRY", "GHL_CONTACT_COUNTRY") ||
-      "CO",
-    source: input.source,
-    customFields: customFields.length > 0 ? customFields : undefined,
-  };
+  const contactFields = buildCrmContactFields(input);
   const response = await crmRequest<CrmContactResponse>("/contacts/upsert", {
     method: "POST",
     body: JSON.stringify({
@@ -531,6 +566,180 @@ export async function upsertCrmContact(input: CrmContactInput): Promise<string> 
     throw new Error("El CRM no confirmó la actualización completa del contacto.");
   }
   return contactId;
+}
+
+export async function updateCrmContactById(
+  contactId: string,
+  input: CrmContactInput,
+  options: { clearMissingFields?: boolean } = {}
+): Promise<string> {
+  const { locationId } = getConfig();
+  const encodedContactId = encodeURIComponent(contactId);
+  const current = await crmRequest<CrmContactResponse>(`/contacts/${encodedContactId}`, {
+    method: "GET",
+  });
+  if (!current.contact?.id || current.contact.locationId !== locationId) {
+    throw new Error("El contacto seleccionado no pertenece a la subcuenta configurada.");
+  }
+
+  const contactFields = buildCrmContactFields(input);
+  const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      ...contactFields,
+      email: input.email?.trim() || (options.clearMissingFields ? null : undefined),
+      address1:
+        input.address?.trim() || (options.clearMissingFields ? null : contactFields.address1),
+      city: input.city?.trim() || (options.clearMissingFields ? null : contactFields.city),
+      state:
+        input.department?.trim() || (options.clearMissingFields ? null : contactFields.state),
+    }),
+  });
+  if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
+    throw new Error("El CRM no confirmó la actualización completa del contacto.");
+  }
+  return contactId;
+}
+
+function normalizeContactSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLocaleLowerCase("es-CO");
+}
+
+function splitCrmAddress(value: string | undefined) {
+  const parts = (value ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return {
+    address: parts[0] ?? "",
+    neighborhood: parts[1] ?? "",
+    addressDetails: parts.slice(2).join(", "),
+  };
+}
+
+async function getIdentificationFieldId() {
+  const { locationId } = getConfig();
+  if (
+    identificationFieldCache?.locationId === locationId &&
+    identificationFieldCache.expiresAt > Date.now()
+  ) {
+    return identificationFieldCache.id;
+  }
+
+  const response = await crmRequest<CrmCustomFieldsResponse>(
+    `/locations/${encodeURIComponent(locationId)}/customFields?model=contact`,
+    { method: "GET" }
+  );
+  const field = response.customFields?.find((candidate) => {
+    const key = candidate.fieldKey?.replace(/^contact\./, "");
+    return key === CRM_MESSAGE_FIELD_KEYS.identificationNumber;
+  });
+  const id = field?.id ?? null;
+  identificationFieldCache = { locationId, id, expiresAt: Date.now() + 10 * 60_000 };
+  return id;
+}
+
+function readCustomField(contact: CrmContactRecord, fieldId: string | null) {
+  if (!fieldId) return "";
+  const field = contact.customFields?.find((candidate) => candidate.id === fieldId);
+  const value = field?.fieldValue ?? field?.value;
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+function toContactSearchResult(
+  contact: CrmContactRecord,
+  identificationFieldId: string | null
+): CrmContactSearchResult | null {
+  if (!contact.id) return null;
+  const name =
+    contact.contactName?.trim() ||
+    contact.name?.trim() ||
+    [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim();
+  if (!name) return null;
+  const address = splitCrmAddress(contact.address ?? contact.address1);
+  return {
+    id: contact.id,
+    name,
+    phone: contact.phone?.trim() ?? "",
+    email: contact.email?.trim() ?? "",
+    cedula: readCustomField(contact, identificationFieldId),
+    ...address,
+    city: contact.city?.trim() ?? "",
+    department: contact.state?.trim() ?? "",
+    countryCode: contact.country?.trim() ?? "CO",
+  };
+}
+
+export async function searchCrmContacts(query: string): Promise<CrmContactSearchResult[]> {
+  const normalizedQuery = normalizeContactSearch(query).slice(0, 100);
+  const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+  const searchableTerms = [...new Set(terms.filter((term) => term.length >= 3))];
+  const phoneQuery = query.replace(/\D/g, "");
+  if (searchableTerms.length === 0 && phoneQuery.length < 3) return [];
+
+  const { locationId } = getConfig();
+  const searches: Array<Promise<CrmContactSearchResponse>> = [];
+  for (const term of searchableTerms) {
+    for (const field of ["firstName", "lastName"] as const) {
+      searches.push(
+        crmRequest<CrmContactSearchResponse>("/contacts/search", {
+          method: "POST",
+          body: JSON.stringify({
+            locationId,
+            page: 1,
+            pageLimit: 20,
+            filters: [{ field, operator: "contains", value: term }],
+          }),
+        })
+      );
+    }
+  }
+  if (phoneQuery.length >= 3) {
+    searches.push(
+      crmRequest<CrmContactSearchResponse>("/contacts/search", {
+        method: "POST",
+        body: JSON.stringify({
+          locationId,
+          page: 1,
+          pageLimit: 20,
+          filters: [{ field: "phone", operator: "contains", value: phoneQuery }],
+        }),
+      })
+    );
+  }
+
+  const [responses, identificationFieldId] = await Promise.all([
+    Promise.all(searches),
+    getIdentificationFieldId().catch(() => null),
+  ]);
+  const contactsById = new Map<string, CrmContactRecord>();
+  for (const response of responses) {
+    for (const contact of response.contacts ?? []) {
+      if (contact.id) contactsById.set(contact.id, contact);
+    }
+  }
+
+  return [...contactsById.values()]
+    .filter((contact) => {
+      const name = normalizeContactSearch(
+        contact.contactName ||
+          contact.name ||
+          [contact.firstName, contact.lastName].filter(Boolean).join(" ")
+      );
+      const phone = (contact.phone ?? "").replace(/\D/g, "");
+      return terms.every((term) => {
+        const digits = term.replace(/\D/g, "");
+        return name.includes(term) || (digits.length >= 3 && phone.includes(digits));
+      });
+    })
+    .map((contact) => toContactSearchResult(contact, identificationFieldId))
+    .filter((contact): contact is CrmContactSearchResult => Boolean(contact))
+    .sort((left, right) => left.name.localeCompare(right.name, "es-CO"))
+    .slice(0, 20);
 }
 
 export async function getCrmContactTags(contactId: string): Promise<string[]> {

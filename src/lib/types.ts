@@ -173,6 +173,20 @@ export interface OrderWithItems extends Order {
   items: OrderItem[];
 }
 
+export interface CrmContactSearchResult {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  cedula: string;
+  address: string;
+  neighborhood: string;
+  addressDetails: string;
+  city: string;
+  department: string;
+  countryCode: string;
+}
+
 // ---- Carrito (cliente) ----
 export interface CartItem {
   productId: string;

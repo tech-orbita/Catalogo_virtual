@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/lib/types";
 import type { OrderStatus, OrderWithItems, PaymentStatus } from "@/lib/types";
 import { OrderQuoteBuilder, type QuoteCatalogOption } from "./OrderQuoteBuilder";
+import { OrderCustomerEditor } from "./OrderCustomerEditor";
 import { PaymentBadge, StatusBadge } from "./OrdersTable";
 
 const NEXT_ORDER_STAGE: Partial<
@@ -196,6 +197,8 @@ export function OrderDetail({
             </div>
           ) : null}
         </section>
+
+        {canManageOrder ? <OrderCustomerEditor order={order} /> : null}
 
         <OrderQuoteBuilder order={order} catalogOptions={catalogOptions} canSend={canSendQuote} onSent={handleQuoteSent} />
       </div>

@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, LoaderCircle, Plus, Search, Trash2, UserRound, X } from "lucide-react";
 import clsx from "clsx";
 import { createManualOrder } from "@/actions/orders";
 import { useToast } from "@/components/ui/Toast";
 import { formatCOP } from "@/lib/currency";
-import type { DeliveryMethod, StoreLocation } from "@/lib/types";
+import type { CrmContactSearchResult, DeliveryMethod, StoreLocation } from "@/lib/types";
 
 export interface ManualOrderCatalogOption {
   key: string;
@@ -163,6 +163,177 @@ function ProductSearchSelect({
   );
 }
 
+function CustomerCrmSearch({
+  selected,
+  onSelect,
+  onClear,
+}: {
+  selected: CrmContactSearchResult | null;
+  onSelect: (contact: CrmContactSearchResult) => void;
+  onClear: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [contacts, setContacts] = useState<CrmContactSearchResult[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (trimmed.length < 3) {
+      return;
+    }
+
+    const currentRequest = ++requestId.current;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      setSearchError(null);
+      try {
+        const response = await fetch(`/api/admin/crm/contacts?q=${encodeURIComponent(trimmed)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = (await response.json()) as {
+          contacts?: CrmContactSearchResult[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "No se pudo consultar el CRM.");
+        if (currentRequest === requestId.current) {
+          setContacts(payload.contacts ?? []);
+          setOpen(true);
+        }
+      } catch (error) {
+        if (controller.signal.aborted || currentRequest !== requestId.current) return;
+        setContacts([]);
+        setSearchError(error instanceof Error ? error.message : "No se pudo consultar el CRM.");
+        setOpen(true);
+      } finally {
+        if (currentRequest === requestId.current) setLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  function choose(contact: CrmContactSearchResult) {
+    onSelect(contact);
+    setQuery("");
+    setContacts([]);
+    setOpen(false);
+  }
+
+  return (
+    <div className="mb-4 rounded-xl border border-orbita-cyan/25 bg-orbita-cyan-soft/35 p-3.5">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-orbita-cyan-dark shadow-sm">
+          <UserRound size={17} aria-hidden="true" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-orbita-navy">Buscar cliente en el CRM</p>
+          <p className="mt-0.5 text-xs leading-5 text-slate-600">
+            Escribe al menos 3 caracteres del nombre o teléfono para rellenar los datos.
+          </p>
+        </div>
+      </div>
+
+      {selected ? (
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-orbita-cyan/30 bg-white px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-900">{selected.name}</p>
+            <p className="truncate text-xs text-slate-500">
+              {[selected.phone, selected.email].filter(Boolean).join(" · ") || "Contacto del CRM"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClear}
+            aria-label="Desvincular cliente del CRM"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          >
+            <X size={17} />
+          </button>
+        </div>
+      ) : (
+        <div className="relative mt-3">
+          <Search
+            size={16}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+          <input
+            value={query}
+            onFocus={() => query.trim().length >= 3 && setOpen(true)}
+            onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+            onChange={(event) => {
+              const nextQuery = event.target.value;
+              setQuery(nextQuery);
+              const canSearch = nextQuery.trim().length >= 3;
+              setOpen(canSearch);
+              if (!canSearch) {
+                setContacts([]);
+                setLoading(false);
+                setSearchError(null);
+              }
+            }}
+            placeholder="Nombre o teléfono del cliente"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="crm-customer-results"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-10 text-sm outline-none focus:border-orbita-cyan-dark"
+          />
+          {loading ? (
+            <LoaderCircle
+              size={17}
+              aria-label="Buscando"
+              className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-orbita-cyan-dark"
+            />
+          ) : null}
+
+          {open ? (
+            <div
+              id="crm-customer-results"
+              role="listbox"
+              className="absolute z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
+            >
+              {searchError ? (
+                <p className="px-3 py-3 text-sm text-red-600">{searchError}</p>
+              ) : loading ? (
+                <p className="px-3 py-3 text-sm text-slate-500">Buscando clientes...</p>
+              ) : contacts.length > 0 ? (
+                contacts.map((contact) => (
+                  <button
+                    key={contact.id}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => choose(contact)}
+                    className="block w-full rounded-lg px-3 py-2.5 text-left hover:bg-brand-light"
+                  >
+                    <span className="block text-sm font-semibold text-slate-900">{contact.name}</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {[contact.phone, contact.email, contact.city].filter(Boolean).join(" · ") || "Sin datos adicionales"}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="px-3 py-3 text-sm text-slate-500">
+                  No encontramos clientes con esa búsqueda.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ManualOrderForm({
   catalogOptions,
   locations,
@@ -172,6 +343,7 @@ export function ManualOrderForm({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const [selectedCrmContact, setSelectedCrmContact] = useState<CrmContactSearchResult | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [customerCedula, setCustomerCedula] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -219,6 +391,19 @@ export function ManualOrderForm({
     if (method === "domicilio") setLocationId("");
   }
 
+  function selectCrmContact(contact: CrmContactSearchResult) {
+    setSelectedCrmContact(contact);
+    setCustomerName(contact.name);
+    setCustomerPhone(contact.phone);
+    setCustomerEmail(contact.email);
+    setCustomerCedula(contact.cedula);
+    setAddress(contact.address);
+    setNeighborhood(contact.neighborhood);
+    setAddressDetails(contact.addressDetails);
+    setCity(contact.city);
+    setDepartment(contact.department);
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setSubmitting(true);
@@ -235,9 +420,11 @@ export function ManualOrderForm({
     });
 
     const result = await createManualOrder({
+      crmContactId: selectedCrmContact?.id,
       customerName,
       customerCedula,
       customerPhone,
+      phoneCountryIso: selectedCrmContact?.countryCode || undefined,
       customerEmail,
       locationId: deliveryMethod === "recoger" ? locationId || undefined : undefined,
       deliveryMethod,
@@ -277,6 +464,11 @@ export function ManualOrderForm({
               Al guardar, estos datos se crearán o actualizarán en el CRM de Órbita IA.
             </p>
           </div>
+          <CustomerCrmSearch
+            selected={selectedCrmContact}
+            onSelect={selectCrmContact}
+            onClear={() => setSelectedCrmContact(null)}
+          />
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-medium text-slate-600 sm:col-span-2">
               Nombre completo

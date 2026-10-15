@@ -13,6 +13,7 @@ import {
   triggerCrmNewOrderNotificationWorkflow,
   triggerCrmOrderConfirmationWorkflow,
   triggerCrmQuoteWorkflow,
+  updateCrmContactById,
   upsertCrmContact,
   normalizePhoneForCrm,
 } from "@/lib/crm";
@@ -60,7 +61,20 @@ export interface ManualOrderItemInput {
 }
 
 export interface CreateManualOrderInput extends Omit<CreateOrderInput, "items"> {
+  crmContactId?: string;
   items: ManualOrderItemInput[];
+}
+
+export interface UpdateOrderCustomerInput {
+  customerName: string;
+  customerCedula: string;
+  customerPhone: string;
+  customerEmail?: string;
+  address?: string;
+  neighborhood?: string;
+  addressDetails?: string;
+  city?: string;
+  department?: string;
 }
 
 export interface QuoteOrderItemInput {
@@ -362,10 +376,11 @@ async function resolveQuoteItems(
 
 async function prepareCrmContact(
   input: Omit<CreateOrderInput, "items">,
-  source: "catalogo" | "asesor"
+  source: "catalogo" | "asesor",
+  contactId?: string | null
 ): Promise<CrmSyncState> {
   try {
-    const contactId = await upsertCrmContact({
+    const contactInput = {
       name: input.customerName,
       email: input.customerEmail,
       phone: input.customerPhone,
@@ -376,8 +391,11 @@ async function prepareCrmContact(
       city: input.city,
       department: input.department,
       source: source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
-    });
-    return { contactId, status: "sincronizado", error: null };
+    };
+    const resolvedContactId = contactId
+      ? await updateCrmContactById(contactId, contactInput)
+      : await upsertCrmContact(contactInput);
+    return { contactId: resolvedContactId, status: "sincronizado", error: null };
   } catch (error) {
     return {
       contactId: null,
@@ -805,7 +823,7 @@ export async function createManualOrder(
   });
   if ("error" in locationResult) return locationResult;
 
-  const crm = await prepareCrmContact(customerInput, "asesor");
+  const crm = await prepareCrmContact(customerInput, "asesor", input.crmContactId);
   const salesOriginResult = await resolveDashboardSalesOrigin(user, locationResult.location);
   const salesOrigin = salesOriginResult.origin;
   const rpcInput = buildRpcInput(customerInput, resolved.items, crm, salesOrigin);
@@ -866,6 +884,91 @@ export async function createManualOrder(
       notification.warning
     ),
   };
+}
+
+export async function updateOrderCustomer(orderId: string, input: UpdateOrderCustomerInput) {
+  const { supabase, user, role } = await requireAdmin();
+  if (!user || role !== "admin") return { error: "No autorizado." };
+
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
+
+  const normalizedPhone = normalizePhoneForCrm(input.customerPhone);
+  const customerInput: Omit<CreateOrderInput, "items"> = {
+    ...input,
+    customerPhone: normalizedPhone,
+    deliveryMethod: order.delivery_method,
+    locationId: order.location_id ?? undefined,
+  };
+  const validationError = validateCustomer(customerInput);
+  if (validationError) return { error: validationError };
+
+  const customerUpdate = {
+    customer_name: customerInput.customerName.trim(),
+    customer_cedula: customerInput.customerCedula.trim(),
+    customer_phone: customerInput.customerPhone,
+    customer_email: customerInput.customerEmail?.trim() || null,
+    address: customerInput.address?.trim() || null,
+    neighborhood: customerInput.neighborhood?.trim() || null,
+    address_details: customerInput.addressDetails?.trim() || null,
+    city: customerInput.city?.trim() || null,
+    department: customerInput.department?.trim() || null,
+  };
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update(customerUpdate)
+    .eq("id", orderId);
+  if (updateError) return { error: updateError.message };
+
+  try {
+    const crmInput = {
+      name: customerInput.customerName,
+      email: customerInput.customerEmail,
+      phone: customerInput.customerPhone,
+      cedula: customerInput.customerCedula,
+      address:
+        [customerInput.address, customerInput.neighborhood, customerInput.addressDetails]
+          .filter(Boolean)
+          .join(", ") || null,
+      city: customerInput.city,
+      department: customerInput.department,
+      source:
+        order.order_source === "asesor"
+          ? "Catálogo virtual - asesor"
+          : "Catálogo virtual - web",
+    };
+    const contactId = order.ghl_contact_id
+      ? await updateCrmContactById(order.ghl_contact_id, crmInput, {
+          clearMissingFields: true,
+        })
+      : await upsertCrmContact(crmInput);
+    await supabase
+      .from("orders")
+      .update({
+        ghl_contact_id: contactId,
+        ghl_sync_status: "sincronizado",
+        ghl_sync_error: null,
+        ghl_synced_at: new Date().toISOString(),
+      })
+      .eq("id", orderId);
+  } catch (syncError) {
+    const warning = `Los datos del pedido se actualizaron, pero el contacto del CRM no se pudo sincronizar: ${errorMessage(syncError)}`;
+    await supabase
+      .from("orders")
+      .update({ ghl_sync_status: "error", ghl_sync_error: warning.slice(0, 500) })
+      .eq("id", orderId);
+    revalidatePath("/admin/pedidos");
+    revalidatePath(`/admin/pedidos/${orderId}`);
+    return { success: true, warning };
+  }
+
+  revalidatePath("/admin/pedidos");
+  revalidatePath(`/admin/pedidos/${orderId}`);
+  return { success: true };
 }
 
 export async function updateOrderStatus(orderId: string, status: OrderStatus) {
