@@ -197,7 +197,7 @@ export function buildStructuredQuoteMessage(
       const label = variantLabel
         ? `${item.product_name} (${variantLabel})`
         : item.product_name;
-      lines.push(`- ${label}: ${formatQuotePrice(item.subtotal)}`);
+      lines.push(`- ${label} ×${item.quantity}: ${formatQuotePrice(item.subtotal)}`);
     }
   }
 
@@ -208,7 +208,7 @@ export function buildStructuredQuoteMessage(
       const label = variantLabel
         ? `${item.product_name} (${variantLabel})`
         : item.product_name;
-      lines.push(`- ${label}`);
+      lines.push(`- ${label} ×${item.quantity}`);
     }
   }
 
