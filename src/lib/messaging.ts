@@ -162,8 +162,10 @@ export function buildStructuredQuoteMessage(
   >,
   items: OrderQuoteItem[],
   deliveryFee: number,
-  quoteNote?: string | null
+  quoteNote?: string | null,
+  options: { withButtons?: boolean } = {}
 ): string {
+  const withButtons = options.withButtons ?? true;
   const availableItems = items.filter((item) => item.available);
   const unavailableItems = items.filter((item) => !item.available);
   const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
@@ -225,7 +227,14 @@ export function buildStructuredQuoteMessage(
     lines.push("", `*Total: ${formatQuotePrice(total)}*`);
   }
   if (quoteNote) lines.push("", "*Notas de la cotización*", quoteNote);
-  lines.push("", "_Si no ves los botones, responde APROBAR o RECHAZAR._");
+  // El reenvío llega como texto normal; la respuesta la sigue esperando el
+  // workflow inicial.
+  lines.push(
+    "",
+    withButtons
+      ? "_Si no ves los botones, responde APROBAR o RECHAZAR._"
+      : "_Responde APROBAR o RECHAZAR._"
+  );
   return sanitizeInteractiveMessageText(lines.join("\n"));
 }
 

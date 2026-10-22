@@ -67,27 +67,27 @@ La variable opcional `ORBITA_CRM_QUOTE_WORKFLOW_ID` permite reemplazar ese ID si
 
 ## 3. Workflow de reenvío: cotización corregida
 
-Nombre sugerido: `Catálogo | Reenviar cotización interactiva`.
+Nombre sugerido: `Catálogo | Reenviar cotización`.
 
-Es frecuente que el cliente no responda la primera cotización o pida cambios. El workflow inicial no admite volver a inscribir a un contacto que sigue dentro, así que los reenvíos usan este workflow aparte.
+Es frecuente que el cliente no responda la primera cotización o pida cambios. El reenvío entrega el texto corregido **sin botones**; la respuesta la sigue esperando el workflow inicial, donde el contacto permanece.
 
-Antes de inscribir al contacto aquí, la aplicación lo **retira** del workflow inicial y de este mismo workflow (`DELETE /contacts/{id}/workflow/{workflowId}`). Si el contacto ya no estaba dentro, por ejemplo porque venció la espera, el error se ignora. Así solo queda activa la última cotización y la respuesta se procesa una sola vez.
-
-Por eso este workflow **debe manejar la respuesta**:
+En GHL, permitir reingreso no basta: un contacto que sigue activo en un workflow no vuelve a entrar. Por eso, antes de inscribirlo, la aplicación lo **retira solo de este workflow** (`DELETE /contacts/{id}/workflow/{workflowId}`). Si no estaba dentro, el error se ignora. Del workflow inicial nunca lo retira.
 
 1. No agregues un trigger: la aplicación inscribe el contacto explícitamente.
-2. En la configuración del workflow activa **Allow re-entry** (permitir reingreso) para admitir varios reenvíos.
-3. Agrega la misma acción de envío por goGHL.ai y conserva el enrutamiento actual de los ocho números.
-4. Pega exactamente el mismo payload de botones:
+2. Activa **Allow re-entry** (permitir reingreso). Actívalo también en el workflow inicial.
+3. Agrega una acción normal de envío por goGHL.ai y conserva el enrutamiento actual de los ocho números.
+4. El contenido del mensaje es solo el campo, **sin** `#btn`:
 
 ```text
-#btn|{{contact.resumen_de_cotizacion}}|undefined|undefined*undefined|quick_reply*Aprobar*aprobar_cotizacion|quick_reply*Rechazar*rechazar_cotizacion
+{{contact.resumen_de_cotizacion}}
 ```
 
-5. Copia del workflow inicial la espera de respuesta y las ramas descritas en la sección 6 (`aprobar_cotizacion` → `Cotización Aceptada`, `rechazar_cotizacion` → `Cotización no Aceptada`, timeout → seguimiento interno). La forma más rápida es duplicar el workflow inicial, quitarle el trigger y publicarlo con este nombre.
-6. El ID de este workflow está versionado como `ae18a7df-b54e-4e0c-998b-b713d661a762`. Si duplicas el workflow, el ID cambia: configura el nuevo ID en `ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID` en Vercel y vuelve a desplegar.
+5. No agregues esperas, ramas ni otras acciones. El workflow termina inmediatamente después del envío.
+6. El ID está versionado como `ae18a7df-b54e-4e0c-998b-b713d661a762`. Si creas otro workflow, configura su ID en `ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID` en Vercel y vuelve a desplegar.
 
-La aplicación elimina `|` de todos los datos dinámicos antes de actualizar el campo. Ese carácter es el separador del protocolo `#btn`, y si aparece dentro del resumen desplaza los parámetros y provoca el error `Invalid button format`. Los valores de la cotización van en líneas separadas por la misma razón.
+En los reenvíos, el resumen cierra con `Responde APROBAR o RECHAZAR.` en lugar de la instrucción sobre los botones. Para que esa respuesta escrita cuente, la espera del workflow inicial debe seguir activa y sus ramas deben aceptar también el texto `APROBAR`/`RECHAZAR`, no solo el ID del botón. Si la espera ya venció, nadie procesa la respuesta y un asesor debe cambiar el estado manualmente.
+
+La aplicación elimina `|` de todos los datos dinámicos antes de actualizar el campo. Ese carácter es el separador del protocolo `#btn` del workflow inicial; dentro del resumen desplaza los parámetros y provoca el error `Invalid button format`.
 
 ## 4. Workflow: notificar al cliente
 
@@ -142,7 +142,7 @@ goGHL.ai documenta que el ID del `quick_reply` alimenta la rama correspondiente.
 2. Publica el workflow de reenvío y configura su ID en `ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID`.
 3. Usa un contacto autorizado y una cotización de prueba identificable.
 4. Verifica, en orden: campo multiline actualizado, una sola ejecución del workflow, número correcto, dos botones visibles, respuesta registrada y etapa correcta.
-5. Edita la misma cotización y solicita el reenvío. Verifica que el contacto salga del workflow inicial, que entre una sola vez al de reenvío y que el mensaje muestre los valores corregidos sin `|`.
-6. Pulsa un botón del mensaje reenviado y confirma que el workflow de reenvío mueve la oportunidad a la etapa correcta.
+5. Edita la misma cotización y solicita el reenvío dos veces. Verifica que cada vez entre una sola vez al workflow de reenvío, que llegue el texto corregido sin botones y que el contacto siga en la espera del workflow inicial.
+6. Responde `APROBAR` por escrito y confirma que el workflow inicial mueve la oportunidad a la etapa correcta.
 
 La marca local `cotizacion_enviada` significa que GHL aceptó la activación del workflow. La entrega real se confirma en el historial del workflow y en los registros de goGHL.ai.

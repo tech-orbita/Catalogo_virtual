@@ -1162,9 +1162,11 @@ export async function triggerOrderQuoteWorkflow(
   ];
   const subtotal = availableItems.reduce((sum, item) => sum + item.subtotal, 0);
   const total = subtotal + deliveryFee;
-  const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee, quoteNote);
-  const nextStatus: OrderStatus = availableItems.length > 0 ? "cotizacion_enviada" : "no_hubo_producto";
   const workflowMode = order.quote_sent_at ? "resend" : "initial";
+  const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee, quoteNote, {
+    withButtons: workflowMode === "initial",
+  });
+  const nextStatus: OrderStatus = availableItems.length > 0 ? "cotizacion_enviada" : "no_hubo_producto";
   let quoteRevision = order.quote_sent_at ? 2 : 1;
   const { data: latestAttempt, error: revisionError } = await supabase
     .from("order_quote_attempts")

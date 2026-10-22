@@ -842,9 +842,10 @@ function getQuoteWorkflowConfig(mode: CrmQuoteWorkflowMode) {
     quoteFieldKey: CRM_MESSAGE_FIELD_KEYS.quote,
     unavailableProductsFieldKey: CRM_MESSAGE_FIELD_KEYS.unavailableProducts,
     workflowId,
-    // Un reenvío reemplaza la cotización pendiente: el contacto sale de cualquier
-    // espera de APROBAR/RECHAZAR anterior para que solo responda la última.
-    workflowsToExit: mode === "resend" ? [initialWorkflowId, resendWorkflowId] : [],
+    // GHL no reinscribe a un contacto que sigue activo aunque el workflow permita
+    // reingreso. Solo se retira del reenvío: el inicial conserva la espera de
+    // APROBAR/RECHAZAR que procesa la respuesta.
+    workflowsToExit: mode === "resend" ? [resendWorkflowId] : [],
   };
 }
 
