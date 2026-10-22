@@ -1,5 +1,6 @@
 import "server-only";
 
+import { sanitizeInteractiveMessageText } from "@/lib/interactive-message";
 import type { CrmContactSearchResult } from "@/lib/types";
 
 const CRM_API_BASE_URL = "https://services.leadconnectorhq.com";
@@ -841,7 +842,25 @@ function getQuoteWorkflowConfig(mode: CrmQuoteWorkflowMode) {
     quoteFieldKey: CRM_MESSAGE_FIELD_KEYS.quote,
     unavailableProductsFieldKey: CRM_MESSAGE_FIELD_KEYS.unavailableProducts,
     workflowId,
+    // Un reenvío reemplaza la cotización pendiente: el contacto sale de cualquier
+    // espera de APROBAR/RECHAZAR anterior para que solo responda la última.
+    workflowsToExit: mode === "resend" ? [initialWorkflowId, resendWorkflowId] : [],
   };
+}
+
+/**
+ * GHL responde con error si el contacto ya no está dentro del workflow. Eso es
+ * normal (la espera pudo vencer), así que la salida es de mejor esfuerzo.
+ */
+async function removeContactFromWorkflow(encodedContactId: string, workflowId: string) {
+  try {
+    await crmRequest<CrmWorkflowEnrollmentResponse>(
+      `/contacts/${encodedContactId}/workflow/${encodeURIComponent(workflowId)}`,
+      { method: "DELETE" }
+    );
+  } catch (error) {
+    console.warn("No se pudo retirar el contacto del workflow de cotización", workflowId, error);
+  }
 }
 
 /**
@@ -855,14 +874,17 @@ export async function triggerCrmQuoteWorkflow(
   unavailableProducts: string[],
   mode: CrmQuoteWorkflowMode = "initial"
 ) {
-  const { quoteFieldKey, unavailableProductsFieldKey, workflowId } = getQuoteWorkflowConfig(mode);
+  const { quoteFieldKey, unavailableProductsFieldKey, workflowId, workflowsToExit } =
+    getQuoteWorkflowConfig(mode);
   const encodedContactId = encodeURIComponent(contactId);
 
   const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {
     method: "PUT",
     body: JSON.stringify({
       customFields: [
-        { key: quoteFieldKey, fieldValue: quoteSummary },
+        // Se sanea aquí también: el campo va dentro del payload #btn y un solo `|`
+        // desplaza los parámetros de los botones.
+        { key: quoteFieldKey, fieldValue: sanitizeInteractiveMessageText(quoteSummary) },
         { key: unavailableProductsFieldKey, fieldValue: unavailableProducts },
       ],
     }),
@@ -870,6 +892,10 @@ export async function triggerCrmQuoteWorkflow(
 
   if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
     throw new Error("El CRM no confirmó la actualización del resumen de la cotización.");
+  }
+
+  for (const exitWorkflowId of new Set(workflowsToExit)) {
+    await removeContactFromWorkflow(encodedContactId, exitWorkflowId);
   }
 
   const enrolled = await crmRequest<CrmWorkflowEnrollmentResponse>(
