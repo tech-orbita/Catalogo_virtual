@@ -5,7 +5,8 @@ import type { CrmContactSearchResult } from "@/lib/types";
 const CRM_API_BASE_URL = "https://services.leadconnectorhq.com";
 const CRM_API_VERSION = "v3";
 const CRM_WORKFLOW_IDS = {
-  quote: "f60ba650-14ca-451d-87c4-6b3ab6eeb311",
+  initialQuote: "f60ba650-14ca-451d-87c4-6b3ab6eeb311",
+  resendQuote: "ae18a7df-b54e-4e0c-998b-b713d661a762",
   storeNotification: "650f1434-4e4c-4c56-a25f-0abb01bf5e4a",
   customerNotification: "7280e96d-7915-4dc4-9cc7-e9ee4034790c",
 } as const;
@@ -820,11 +821,26 @@ export async function triggerCrmNewOrderNotificationWorkflow(contactId: string, 
   });
 }
 
-function getQuoteWorkflowConfig() {
+export type CrmQuoteWorkflowMode = "initial" | "resend";
+
+function getQuoteWorkflowConfig(mode: CrmQuoteWorkflowMode) {
+  const initialWorkflowId =
+    readEnv("ORBITA_CRM_QUOTE_WORKFLOW_ID", "GHL_QUOTE_WORKFLOW_ID") ??
+    CRM_WORKFLOW_IDS.initialQuote;
+  const resendWorkflowId = readEnv(
+    "ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID",
+    "GHL_QUOTE_RESEND_WORKFLOW_ID"
+  ) ?? CRM_WORKFLOW_IDS.resendQuote;
+  const workflowId = mode === "resend" ? resendWorkflowId : initialWorkflowId;
+  if (!workflowId) {
+    throw new CrmConfigurationError(
+      "Configura ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID con el workflow corto de reenvío."
+    );
+  }
   return {
     quoteFieldKey: CRM_MESSAGE_FIELD_KEYS.quote,
     unavailableProductsFieldKey: CRM_MESSAGE_FIELD_KEYS.unavailableProducts,
-    workflowId: CRM_WORKFLOW_IDS.quote,
+    workflowId,
   };
 }
 
@@ -836,9 +852,10 @@ function getQuoteWorkflowConfig() {
 export async function triggerCrmQuoteWorkflow(
   contactId: string,
   quoteSummary: string,
-  unavailableProducts: string[]
+  unavailableProducts: string[],
+  mode: CrmQuoteWorkflowMode = "initial"
 ) {
-  const { quoteFieldKey, unavailableProductsFieldKey, workflowId } = getQuoteWorkflowConfig();
+  const { quoteFieldKey, unavailableProductsFieldKey, workflowId } = getQuoteWorkflowConfig(mode);
   const encodedContactId = encodeURIComponent(contactId);
 
   const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {

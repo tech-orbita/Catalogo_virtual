@@ -335,17 +335,20 @@ export function OrderQuoteBuilder({
       }
 
       const nextStatus = result.status ?? "cotizacion_enviada";
+      const wasResend = result.workflowMode === "resend";
       const successMessage =
         nextStatus === "no_hubo_producto"
-          ? "Se informó que los productos no están disponibles."
-          : "Cotización enviada correctamente.";
+          ? "La solicitud para informar la falta de productos quedó registrada en GHL."
+          : wasResend
+            ? "La solicitud de reenvío de la cotización quedó registrada en GHL."
+            : "La solicitud de envío de la cotización quedó registrada en GHL.";
       setFeedback({
         kind: result.warning ? "warning" : "success",
         message: result.warning ?? successMessage,
       });
       toast.update(toastId, {
         variant: result.warning ? "warning" : "success",
-        title: result.warning ? "Cotización enviada con una novedad" : successMessage,
+        title: result.warning ? "Solicitud registrada con una novedad" : successMessage,
         description: result.warning,
       });
       onSent(nextStatus);
@@ -622,13 +625,13 @@ export function OrderQuoteBuilder({
             {isPending
               ? "Enviando..."
               : order.quote_sent_at
-                ? "Reenviar cotización"
+                ? "Guardar cambios y reenviar"
                 : "Enviar cotización"}
           </button>
         </div>
         {!canSend ? (
           <p className="text-xs text-slate-500">
-            Para editar y enviar otra cotización, devuelve el pedido a Pedido realizado.
+            Este estado ya no permite editar ni volver a solicitar la cotización.
           </p>
         ) : null}
       </div>

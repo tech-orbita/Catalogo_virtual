@@ -1,4 +1,5 @@
 import { formatCOP } from "@/lib/currency";
+import { sanitizeInteractiveMessageText } from "@/lib/interactive-message";
 import type { DeliveryMethod, OrderQuoteItem, OrderWithItems } from "@/lib/types";
 
 export const DELIVERY_MINIMUM_SUBTOTAL = 50_000;
@@ -215,14 +216,17 @@ export function buildStructuredQuoteMessage(
   if (order.delivery_method === "domicilio") {
     lines.push(
       "",
-      `*Resumen de valores:* Productos: ${formatQuotePrice(subtotal)} | Domicilio: ${formatQuotePrice(deliveryFee)} | *Total: ${formatQuotePrice(total)}*`
+      "*Resumen de valores*",
+      `Productos: ${formatQuotePrice(subtotal)}`,
+      `Domicilio: ${formatQuotePrice(deliveryFee)}`,
+      `*Total: ${formatQuotePrice(total)}*`
     );
   } else {
     lines.push("", `*Total: ${formatQuotePrice(total)}*`);
   }
   if (quoteNote) lines.push("", "*Notas de la cotización*", quoteNote);
   lines.push("", "_Si no ves los botones, responde APROBAR o RECHAZAR._");
-  return lines.join("\n");
+  return sanitizeInteractiveMessageText(lines.join("\n"));
 }
 
 export function buildOrderCrmNote(order: {

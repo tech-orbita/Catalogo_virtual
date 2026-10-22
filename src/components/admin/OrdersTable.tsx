@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { formatCOP } from "@/lib/currency";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/lib/types";
 import type { Order, OrderStatus, PaymentStatus } from "@/lib/types";
@@ -55,7 +55,7 @@ export function OrdersTable({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por número, nombre o teléfono"
+            placeholder="Buscar por número, nombre, teléfono o cédula"
             className="w-full rounded-lg border border-black/10 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-brand"
           />
         </form>
@@ -98,6 +98,14 @@ export function OrdersTable({
             </option>
           ))}
         </select>
+
+        <a
+          href={`/api/admin/orders/export?${searchParams.toString()}`}
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-orbita-cyan/40 bg-white px-3 py-2 text-sm font-semibold text-orbita-navy transition hover:bg-orbita-cyan-soft"
+        >
+          <Download size={16} aria-hidden="true" />
+          Exportar Excel
+        </a>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-black/5 bg-white">
@@ -107,6 +115,7 @@ export function OrdersTable({
               <th className="p-3">Pedido</th>
               <th className="p-3">Fecha</th>
               <th className="p-3">Comprador</th>
+              <th className="p-3">Cédula</th>
               <th className="p-3">Origen</th>
               <th className="p-3">Entrega</th>
               <th className="p-3">Valor</th>
@@ -123,6 +132,7 @@ export function OrdersTable({
                   {new Date(order.created_at).toLocaleDateString("es-CO")}
                 </td>
                 <td className="p-3">{order.customer_name}</td>
+                <td className="p-3 text-black/50">{order.customer_cedula}</td>
                 <td className="p-3 text-black/50">
                   {order.sales_origin_label || (order.order_source === "asesor" ? "Asesor" : "Catálogo virtual")}
                 </td>

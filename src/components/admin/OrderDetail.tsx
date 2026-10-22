@@ -51,7 +51,12 @@ export function OrderDetail({
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(order.payment_status);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
-  const canSendQuote = ["pedido_realizado", "cotizacion_enviada", "no_hubo_producto"].includes(status);
+  const canSendQuote = [
+    "pedido_realizado",
+    "cotizacion_enviada",
+    "cotizacion_aceptada",
+    "no_hubo_producto",
+  ].includes(status);
   const nextStage = NEXT_ORDER_STAGE[status];
 
   async function handleStatusChange(next: OrderStatus) {

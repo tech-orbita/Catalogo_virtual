@@ -39,13 +39,13 @@ productos_no_disponibles
 
 En el editor del workflow inserta el campo desde el selector de custom values. Debe quedar como `{{contact.resumen_de_cotizacion}}`.
 
-## 2. Workflow: enviar cotización
+## 2. Workflow inicial: enviar cotización
 
 Nombre sugerido: `Catálogo | Enviar cotización interactiva`.
 
 Configuración:
 
-1. Activa el reingreso o múltiples ejecuciones para permitir reenviar una cotización al mismo contacto.
+1. Conserva la configuración actual de este workflow, incluida la espera de aprobación o rechazo.
 2. No agregues un trigger por cambio de campo: la aplicación inscribe el contacto explícitamente y un segundo trigger produciría mensajes duplicados.
 3. Agrega una acción normal de envío por el canal de goGHL.ai que ya usa la cuenta.
 4. Conserva en esa acción el enrutamiento actual de los ocho números. La app no envía `fromNumber` ni `conversationProviderId`.
@@ -63,7 +63,29 @@ El workflow configurado en la aplicación es:
 f60ba650-14ca-451d-87c4-6b3ab6eeb311
 ```
 
-## 3. Workflow: notificar al cliente
+La variable opcional `ORBITA_CRM_QUOTE_WORKFLOW_ID` permite reemplazar ese ID sin cambiar código.
+
+## 3. Workflow corto: reenviar una cotización corregida
+
+Nombre sugerido: `Catálogo | Reenviar cotización interactiva`.
+
+Este es un workflow separado para que una cotización corregida no intente volver a entrar al flujo inicial mientras el contacto todavía está esperando APROBAR o RECHAZAR.
+
+1. No agregues un trigger: la aplicación inscribe el contacto explícitamente.
+2. Activa el reingreso o múltiples ejecuciones.
+3. Agrega únicamente la misma acción de envío por goGHL.ai y conserva el enrutamiento actual de los ocho números.
+4. Pega exactamente el mismo payload de botones:
+
+```text
+#btn|{{contact.resumen_de_cotizacion}}|undefined|undefined*undefined|quick_reply*Aprobar*aprobar_cotizacion|quick_reply*Rechazar*rechazar_cotizacion
+```
+
+5. No agregues esperas, ramas de aprobación/rechazo ni otras acciones. El workflow debe terminar inmediatamente después del envío.
+6. El ID entregado para este workflow quedó versionado como `ae18a7df-b54e-4e0c-998b-b713d661a762`. La variable de producción `ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID` permite reemplazarlo sin cambiar código.
+
+La aplicación elimina `|` de todos los datos dinámicos antes de actualizar el campo. Ese carácter está reservado por el protocolo `#btn` y dentro del resumen rompe la estructura con el error `Invalid button format`.
+
+## 4. Workflow: notificar al cliente
 
 - ID: `7280e96d-7915-4dc4-9cc7-e9ee4034790c`
 - Permitir reingreso: sí.
@@ -77,7 +99,7 @@ f60ba650-14ca-451d-87c4-6b3ab6eeb311
 
 El campo ya contiene un resumen compacto para que el cliente confirme nombre, teléfono, cédula, correo, modalidad y datos de entrega, productos, subtotal y notas. También indica cómo reportar un error y avisa que un asesor confirmará disponibilidad y enviará la cotización final. No agregues otro saludo ni dupliques el contenido dentro del workflow.
 
-## 4. Workflow: notificar a la sede
+## 5. Workflow: notificar a la sede y a facturación
 
 - ID: `650f1434-4e4c-4c56-a25f-0abb01bf5e4a`
 - Permitir reingreso: sí.
@@ -91,7 +113,14 @@ El campo ya contiene un resumen compacto para que el cliente confirme nombre, te
 
 Para recoger, el destinatario es el contacto creado o actualizado con el WhatsApp de la sede. Para domicilio, es el contacto del centro logístico. El campo contiene cliente, teléfono, cédula, entrega, dirección separada por campos, productos, subtotal, notas y constancia de aceptación del tratamiento de datos.
 
-## 5. Continuar el flujo de cotización
+Cuando una cotización pasa a `Cotización aceptada`, la aplicación reutiliza este workflow para avisar al contacto definido por:
+
+```text
+ORBITA_BILLING_WHATSAPP_NUMBER=
+ORBITA_BILLING_CONTACT_NAME=Facturación
+```
+
+## 6. Continuar el flujo de cotización
 
 Después del envío interactivo:
 
@@ -103,12 +132,13 @@ Después del envío interactivo:
 
 goGHL.ai documenta que el ID del `quick_reply` alimenta la rama correspondiente. Confirma en una prueba si el filtro del workflow expone el ID o el texto visible y selecciona el valor real que aparezca en el historial.
 
-## 6. Prueba controlada
+## 7. Prueba controlada
 
 1. Mantén el workflow en borrador mientras configuras el campo y las ramas.
-2. Publica únicamente cuando las cuatro keys y los tres workflows correspondan a la misma subcuenta.
+2. Publica el workflow corto y configura su ID en `ORBITA_CRM_QUOTE_RESEND_WORKFLOW_ID`.
 3. Usa un contacto autorizado y una cotización de prueba identificable.
 4. Verifica, en orden: campo multiline actualizado, una sola ejecución del workflow, número correcto, dos botones visibles, respuesta registrada y etapa correcta.
-5. Repite con el mismo contacto para comprobar el reingreso y que no se duplique el mensaje.
+5. Edita la misma cotización y solicita el reenvío. Verifica que se ejecute una sola vez el workflow corto, que termine inmediatamente y que la cotización muestre los valores corregidos.
+6. Confirma que la respuesta de los botones siga siendo procesada por el flujo inicial existente.
 
 La marca local `cotizacion_enviada` significa que GHL aceptó la activación del workflow. La entrega real se confirma en el historial del workflow y en los registros de goGHL.ai.

@@ -94,7 +94,12 @@ export interface TriggerOrderQuoteWorkflowInput {
 
 export type TriggerOrderQuoteWorkflowResult =
   | { error: string }
-  | { success: true; status: "cotizacion_enviada" | "no_hubo_producto"; warning?: string };
+  | {
+      success: true;
+      status: "cotizacion_enviada" | "no_hubo_producto";
+      workflowMode: "initial" | "resend";
+      warning?: string;
+    };
 
 export interface CreateOrderResult {
   orderId: string;
@@ -141,6 +146,15 @@ const PAYMENT_STATUSES = new Set(Object.keys(PAYMENT_STATUS_LABELS) as PaymentSt
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Ocurrió un error inesperado.";
+}
+
+function isMissingQuoteAttemptsTable(error: { code?: string; message?: string } | null) {
+  return Boolean(
+    error &&
+      (error.code === "42P01" ||
+        error.code === "PGRST205" ||
+        error.message?.includes("order_quote_attempts"))
+  );
 }
 
 function joinWarnings(...warnings: Array<string | null | undefined>) {
@@ -1021,6 +1035,49 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
         ghl_synced_at: new Date().toISOString(),
       })
       .eq("id", orderId);
+
+    if (status === "cotizacion_aceptada" && order.status !== "cotizacion_aceptada") {
+      const billingPhone = process.env.ORBITA_BILLING_WHATSAPP_NUMBER?.trim();
+      if (!billingPhone) {
+        throw new CrmConfigurationError(
+          "Configura ORBITA_BILLING_WHATSAPP_NUMBER para avisar a facturación cuando acepten una cotización."
+        );
+      }
+      const billingContactId = await upsertCrmContact({
+        name: process.env.ORBITA_BILLING_CONTACT_NAME?.trim() || "Facturación",
+        phone: billingPhone,
+        source: "Alertas de cotizaciones aceptadas - catálogo virtual",
+      });
+      await triggerCrmNewOrderNotificationWorkflow(
+        billingContactId,
+        [
+          `Cotización aceptada #${order.order_number}`,
+          `Cliente: ${order.customer_name}`,
+          `Cédula: ${order.customer_cedula}`,
+          `Teléfono: ${order.customer_phone}`,
+          `Total: ${Number(order.total).toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 })}`,
+          `Entrega: ${order.delivery_method === "domicilio" ? "Domicilio" : "Recoger en tienda"}`,
+          order.location_name_snapshot ? `Sede: ${order.location_name_snapshot}` : null,
+          "Revisar facturación y continuar la preparación del pedido.",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+      const { data: latestAttempt, error: attemptLookupError } = await supabase
+        .from("order_quote_attempts")
+        .select("id")
+        .eq("order_id", orderId)
+        .eq("status", "requested")
+        .order("revision", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!attemptLookupError && latestAttempt) {
+        await supabase
+          .from("order_quote_attempts")
+          .update({ accepted_notified_at: new Date().toISOString() })
+          .eq("id", latestAttempt.id);
+      }
+    }
   } catch (syncError) {
     const warning = `El estado local cambió, pero el CRM no se pudo sincronizar: ${errorMessage(syncError)}`;
     await supabase
@@ -1067,7 +1124,11 @@ export async function triggerOrderQuoteWorkflow(
     .maybeSingle();
 
   if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
-  if (!["pedido_realizado", "cotizacion_enviada", "no_hubo_producto"].includes(order.status)) {
+  if (
+    !["pedido_realizado", "cotizacion_enviada", "cotizacion_aceptada", "no_hubo_producto"].includes(
+      order.status
+    )
+  ) {
     return { error: "Solo puedes cotizar pedidos pendientes o reenviar una cotización." };
   }
 
@@ -1103,6 +1164,16 @@ export async function triggerOrderQuoteWorkflow(
   const total = subtotal + deliveryFee;
   const quoteSummary = buildStructuredQuoteMessage(order, quoteItems, deliveryFee, quoteNote);
   const nextStatus: OrderStatus = availableItems.length > 0 ? "cotizacion_enviada" : "no_hubo_producto";
+  const workflowMode = order.quote_sent_at ? "resend" : "initial";
+  let quoteRevision = order.quote_sent_at ? 2 : 1;
+  const { data: latestAttempt, error: revisionError } = await supabase
+    .from("order_quote_attempts")
+    .select("revision")
+    .eq("order_id", orderId)
+    .order("revision", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!revisionError && latestAttempt) quoteRevision = Number(latestAttempt.revision) + 1;
 
   let contactId: string;
   try {
@@ -1120,6 +1191,22 @@ export async function triggerOrderQuoteWorkflow(
     });
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);
+    const { error: attemptError } = await supabase.from("order_quote_attempts").insert({
+      order_id: orderId,
+      revision: quoteRevision,
+      attempt_kind: workflowMode,
+      status: "error",
+      quote_message: quoteSummary,
+      quote_items: quoteItems,
+      delivery_fee: deliveryFee,
+      subtotal,
+      total,
+      requested_by_email: user.email ?? null,
+      error_message: message,
+    });
+    if (attemptError && !isMissingQuoteAttemptsTable(attemptError)) {
+      console.error("No se pudo registrar el intento fallido de cotización", attemptError);
+    }
     await supabase
       .from("orders")
       .update({
@@ -1132,7 +1219,8 @@ export async function triggerOrderQuoteWorkflow(
   }
 
   try {
-    await triggerCrmQuoteWorkflow(contactId, quoteSummary, unavailableProducts);
+    await triggerCrmQuoteWorkflow(contactId, quoteSummary, unavailableProducts, workflowMode);
+    const requestedAt = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("orders")
       .update({
@@ -1142,7 +1230,7 @@ export async function triggerOrderQuoteWorkflow(
         quote_delivery_fee: deliveryFee,
         subtotal,
         total,
-        quote_sent_at: new Date().toISOString(),
+        quote_sent_at: requestedAt,
         quote_sent_by_email: user.email ?? null,
         ghl_contact_id: contactId,
         ghl_sync_status: "sincronizado",
@@ -1155,6 +1243,24 @@ export async function triggerOrderQuoteWorkflow(
       })
       .eq("id", orderId);
 
+    const { error: attemptError } = await supabase.from("order_quote_attempts").insert({
+      order_id: orderId,
+      revision: quoteRevision,
+      attempt_kind: workflowMode,
+      status: "requested",
+      quote_message: quoteSummary,
+      quote_items: quoteItems,
+      delivery_fee: deliveryFee,
+      subtotal,
+      total,
+      requested_by_email: user.email ?? null,
+      requested_at: requestedAt,
+    });
+    const attemptWarning =
+      attemptError && !isMissingQuoteAttemptsTable(attemptError)
+        ? "El envío fue solicitado, pero no se pudo guardar su historial detallado."
+        : undefined;
+
     revalidatePath("/admin");
     revalidatePath("/admin/pedidos");
     revalidatePath(`/admin/pedidos/${orderId}`);
@@ -1163,6 +1269,7 @@ export async function triggerOrderQuoteWorkflow(
       return {
         success: true,
         status: nextStatus,
+        workflowMode,
         warning:
           "La cotización fue preparada, pero su estado local necesita revisión antes de reenviarla.",
       };
@@ -1178,7 +1285,7 @@ export async function triggerOrderQuoteWorkflow(
         total,
         stage: nextStatus,
       });
-      return { success: true, status: nextStatus };
+      return { success: true, status: nextStatus, workflowMode, warning: attemptWarning };
     } catch (syncError) {
       const technicalWarning = `La cotización fue preparada, pero la oportunidad no cambió de etapa: ${errorMessage(syncError)}`;
       await supabase
@@ -1188,11 +1295,31 @@ export async function triggerOrderQuoteWorkflow(
       return {
         success: true,
         status: nextStatus,
-        warning: "La cotización quedó preparada, pero su estado externo necesita revisión.",
+        workflowMode,
+        warning: joinWarnings(
+          attemptWarning,
+          "La cotización quedó preparada, pero su estado externo necesita revisión."
+        ),
       };
     }
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);
+    const { error: attemptError } = await supabase.from("order_quote_attempts").insert({
+      order_id: orderId,
+      revision: quoteRevision,
+      attempt_kind: workflowMode,
+      status: "error",
+      quote_message: quoteSummary,
+      quote_items: quoteItems,
+      delivery_fee: deliveryFee,
+      subtotal,
+      total,
+      requested_by_email: user.email ?? null,
+      error_message: message,
+    });
+    if (attemptError && !isMissingQuoteAttemptsTable(attemptError)) {
+      console.error("No se pudo registrar el workflow fallido de cotización", attemptError);
+    }
     await supabase
       .from("orders")
       .update({ ghl_contact_id: contactId, ghl_sync_status: "error", ghl_sync_error: message })

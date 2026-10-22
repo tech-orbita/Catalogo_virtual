@@ -30,10 +30,12 @@ export async function getAdminOrders(options: {
     const asNumber = Number(search);
     if (!Number.isNaN(asNumber) && search !== "") {
       query = query.or(
-        `order_number.eq.${asNumber},customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`
+        `order_number.eq.${asNumber},customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,customer_cedula.ilike.%${search}%`
       );
     } else {
-      query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%`);
+      query = query.or(
+        `customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,customer_cedula.ilike.%${search}%`
+      );
     }
   }
 

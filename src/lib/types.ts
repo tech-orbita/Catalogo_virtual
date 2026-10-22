@@ -157,6 +157,18 @@ export interface OrderQuoteItem {
   quote_note?: string | null;
 }
 
+export interface OrderQuoteAttempt {
+  id: string;
+  order_id: string;
+  revision: number;
+  attempt_kind: "initial" | "resend";
+  status: "requested" | "error";
+  requested_at: string;
+  requested_by_email: string | null;
+  error_message: string | null;
+  accepted_notified_at: string | null;
+}
+
 export interface OrderItem {
   id: string;
   order_id: string;
