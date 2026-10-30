@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { ArrowRight, Download, Loader2, Search } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, Download, Loader2, Search } from "lucide-react";
 import { updateOrderStatus } from "@/actions/orders";
 import { useToast } from "@/components/ui/Toast";
 import { formatCOP } from "@/lib/currency";
@@ -114,10 +114,11 @@ export function OrdersTable({
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-black/5 bg-white">
-        <table className="min-w-[760px] w-full text-sm">
+        <table className="min-w-[860px] w-full text-sm">
           <thead>
             <tr className="border-b border-black/5 text-left text-xs uppercase tracking-wide text-black/40">
               <th className="p-3">Pedido</th>
+              <th className="p-3">Fecha</th>
               <th className="p-3">Comprador</th>
               <th className="p-3">Entrega</th>
               <th className="p-3">Valor</th>
@@ -129,6 +130,16 @@ export function OrdersTable({
             {orders.map((order) => (
               <tr key={order.id} className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]">
                 <td className="p-3 font-medium">#{order.order_number}</td>
+                <td className="whitespace-nowrap p-3 text-black/60">
+                  {new Date(order.created_at).toLocaleDateString("es-CO", { timeZone: "America/Bogota" })}
+                  <span className="mt-0.5 block text-xs text-black/40">
+                    {new Date(order.created_at).toLocaleTimeString("es-CO", {
+                      timeZone: "America/Bogota",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </td>
                 <td className="p-3">{order.customer_name}</td>
                 <td className="p-3 text-black/50">
                   <span className="capitalize">{order.delivery_method}</span>
@@ -223,17 +234,28 @@ function OrderStageCell({ order }: { order: Order }) {
   return (
     <td className="p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={status}
-          onChange={(event) => changeStatus(event.target.value as OrderStatus)}
-          disabled={isUpdating}
-          aria-label={`Estado del pedido #${order.order_number}`}
-          className={`max-w-[11rem] cursor-pointer rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-medium outline-none focus:ring-2 focus:ring-orbita-cyan/40 disabled:cursor-wait disabled:opacity-60 ${STATUS_COLORS[status]}`}
-        >
-          {(Object.entries(ORDER_STATUS_LABELS) as [OrderStatus, string][]).map(([value, label]) => (
-            <option key={value} value={value} disabled={!canMoveToStatus(status, value)}>{label}</option>
-          ))}
-        </select>
+        <div className="relative w-48">
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute left-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full ${STATUS_DOTS[status]}`}
+          />
+          <select
+            value={status}
+            onChange={(event) => changeStatus(event.target.value as OrderStatus)}
+            disabled={isUpdating}
+            aria-label={`Estado del pedido #${order.order_number}`}
+            className="min-h-8 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white py-1.5 pl-7 pr-8 text-xs font-medium text-slate-800 shadow-sm outline-none transition hover:border-slate-300 focus:border-orbita-cyan-dark focus:ring-2 focus:ring-orbita-cyan/20 disabled:cursor-wait disabled:opacity-60"
+          >
+            {(Object.entries(ORDER_STATUS_LABELS) as [OrderStatus, string][]).map(([value, label]) => (
+              <option key={value} value={value} disabled={!canMoveToStatus(status, value)}>{label}</option>
+            ))}
+          </select>
+          <ChevronDown
+            size={14}
+            aria-hidden="true"
+            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+          />
+        </div>
         {nextStage ? (
           <button
             type="button"
@@ -257,7 +279,14 @@ function OrderStageCell({ order }: { order: Order }) {
           >
             Cotizar
           </Link>
-        ) : null}
+        ) : status === "pedido_entregado" ? (
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700">
+            <CheckCircle2 size={14} aria-hidden="true" />
+            Completado
+          </span>
+        ) : (
+          <span className="text-xs text-black/40">Cerrado</span>
+        )}
       </div>
     </td>
   );
@@ -272,6 +301,17 @@ const STATUS_COLORS: Record<OrderStatus, string> = {
   pedido_listo: "bg-purple-50 text-purple-700",
   pedido_enviado: "bg-indigo-50 text-indigo-700",
   pedido_entregado: "bg-green-50 text-green-700",
+};
+
+const STATUS_DOTS: Record<OrderStatus, string> = {
+  pedido_realizado: "bg-amber-500",
+  cotizacion_enviada: "bg-cyan-500",
+  cotizacion_aceptada: "bg-blue-500",
+  cotizacion_no_aceptada: "bg-rose-500",
+  no_hubo_producto: "bg-red-500",
+  pedido_listo: "bg-purple-500",
+  pedido_enviado: "bg-indigo-500",
+  pedido_entregado: "bg-green-500",
 };
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
