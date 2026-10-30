@@ -164,7 +164,11 @@ export function buildStructuredQuoteMessage(
   items: OrderQuoteItem[],
   deliveryFee: number,
   quoteNote?: string | null,
-  options: { withButtons?: boolean } = {}
+  options: {
+    withButtons?: boolean;
+    /** Reemplaza la línea final de APROBAR/RECHAZAR. */
+    closingLines?: string[];
+  } = {}
 ): string {
   const withButtons = options.withButtons ?? true;
   const availableItems = items.filter((item) => item.available);
@@ -228,14 +232,18 @@ export function buildStructuredQuoteMessage(
     lines.push("", `*Total: ${formatQuotePrice(total)}*`);
   }
   if (quoteNote) lines.push("", "*Notas de la cotización*", quoteNote);
-  // El reenvío llega como texto normal; la respuesta la sigue esperando el
-  // workflow inicial.
-  lines.push(
-    "",
-    withButtons
-      ? "_Si no ves los botones, responde APROBAR o RECHAZAR._"
-      : "_Responde APROBAR o RECHAZAR._"
-  );
+  if (options.closingLines) {
+    if (options.closingLines.length > 0) lines.push("", ...options.closingLines);
+  } else {
+    // El reenvío llega como texto normal; la respuesta la sigue esperando el
+    // workflow inicial.
+    lines.push(
+      "",
+      withButtons
+        ? "_Si no ves los botones, responde APROBAR o RECHAZAR._"
+        : "_Responde APROBAR o RECHAZAR._"
+    );
+  }
   return sanitizeInteractiveMessageText(lines.join("\n"));
 }
 
