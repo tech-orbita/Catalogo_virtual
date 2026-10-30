@@ -59,6 +59,10 @@ interface CrmContactResponse {
   contact?: CrmContactRecord;
 }
 
+interface CrmDuplicateContactResponse extends CrmContactResponse {
+  matchingField?: string;
+}
+
 interface CrmContactRecord {
   id?: string;
   locationId?: string;
@@ -537,43 +541,78 @@ export async function syncCrmProductOpportunityStage(input: {
   await ensureProductOpportunity(input);
 }
 
+async function findDuplicateCrmContact(
+  locationId: string,
+  identity: { number?: string; email?: string }
+) {
+  const params = new URLSearchParams({ locationId });
+  if (identity.number) params.set("number", identity.number);
+  if (identity.email) params.set("email", identity.email);
+
+  const response = await crmRequest<CrmDuplicateContactResponse>(
+    `/contacts/search/duplicate?${params.toString()}`,
+    { method: "GET" }
+  );
+  return response.contact?.id ? response.contact : null;
+}
+
 export async function upsertCrmContact(input: CrmContactInput): Promise<string> {
   const { locationId } = getConfig();
   const contactFields = buildCrmContactFields(input);
+  const email = input.email?.trim() || undefined;
+
+  // La búsqueda se hace por separado porque una subcuenta puede tener el teléfono
+  // y el correo repartidos entre dos contactos antiguos. Para WhatsApp manda el
+  // teléfono: reutilizamos ese contacto y no intentamos copiarle un correo que ya
+  // pertenece a otro registro.
+  const [phoneContact, emailContact] = await Promise.all([
+    findDuplicateCrmContact(locationId, { number: contactFields.phone }),
+    email
+      ? findDuplicateCrmContact(locationId, { email })
+      : Promise.resolve<CrmContactRecord | null>(null),
+  ]);
+  const existingContact = phoneContact ?? emailContact;
+
+  if (existingContact?.id) {
+    const contactId = existingContact.id;
+    const emailBelongsToAnotherContact = Boolean(
+      emailContact?.id && emailContact.id !== contactId
+    );
+    const updated = await crmRequest<CrmContactUpdateResponse>(
+      `/contacts/${encodeURIComponent(contactId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          ...contactFields,
+          email: emailBelongsToAnotherContact ? undefined : email,
+        }),
+      }
+    );
+    if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
+      throw new Error("El CRM no confirmó la actualización completa del contacto.");
+    }
+    return contactId;
+  }
+
   const response = await crmRequest<CrmContactResponse>("/contacts/upsert", {
     method: "POST",
     body: JSON.stringify({
       locationId,
       ...contactFields,
+      email,
       createNewIfDuplicateAllowed: false,
     }),
   });
 
   const contactId = response.contact?.id;
   if (!contactId) throw new Error("El CRM no devolvió el identificador del contacto.");
-
-  // El upsert se hace sin correo para que la coincidencia dependa primero del
-  // teléfono. Después completamos el contacto exacto por ID con el resto de datos.
-  const updated = await crmRequest<CrmContactUpdateResponse>(
-    `/contacts/${encodeURIComponent(contactId)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({
-        ...contactFields,
-        email: input.email?.trim() || undefined,
-      }),
-    }
-  );
-  if (updated.succeeded === false || (updated.contact?.id && updated.contact.id !== contactId)) {
-    throw new Error("El CRM no confirmó la actualización completa del contacto.");
-  }
   return contactId;
 }
 
 export async function updateCrmContactById(
   contactId: string,
   input: CrmContactInput,
-  options: { clearMissingFields?: boolean } = {}
+  options: { clearMissingFields?: boolean; preserveConflictingIdentity?: boolean } = {}
 ): Promise<string> {
   const { locationId } = getConfig();
   const encodedContactId = encodeURIComponent(contactId);
@@ -585,11 +624,28 @@ export async function updateCrmContactById(
   }
 
   const contactFields = buildCrmContactFields(input);
+  const requestedEmail = input.email?.trim() || undefined;
+  let phone: string | undefined = contactFields.phone;
+  let email: string | null | undefined =
+    requestedEmail || (options.clearMissingFields ? null : undefined);
+
+  if (options.preserveConflictingIdentity) {
+    const [phoneContact, emailContact] = await Promise.all([
+      findDuplicateCrmContact(locationId, { number: contactFields.phone }),
+      requestedEmail
+        ? findDuplicateCrmContact(locationId, { email: requestedEmail })
+        : Promise.resolve<CrmContactRecord | null>(null),
+    ]);
+    if (phoneContact?.id && phoneContact.id !== contactId) phone = undefined;
+    if (emailContact?.id && emailContact.id !== contactId) email = undefined;
+  }
+
   const updated = await crmRequest<CrmContactUpdateResponse>(`/contacts/${encodedContactId}`, {
     method: "PUT",
     body: JSON.stringify({
       ...contactFields,
-      email: input.email?.trim() || (options.clearMissingFields ? null : undefined),
+      phone,
+      email,
       address1:
         input.address?.trim() || (options.clearMissingFields ? null : contactFields.address1),
       city: input.city?.trim() || (options.clearMissingFields ? null : contactFields.city),

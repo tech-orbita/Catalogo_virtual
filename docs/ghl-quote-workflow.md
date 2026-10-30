@@ -103,7 +103,7 @@ La aplicación elimina `|` de todos los datos dinámicos antes de actualizar el 
 
 El campo ya contiene un resumen compacto para que el cliente confirme nombre, teléfono, cédula, correo, modalidad y datos de entrega, productos, subtotal y notas. También indica cómo reportar un error y avisa que un asesor confirmará disponibilidad y enviará la cotización final. No agregues otro saludo ni dupliques el contenido dentro del workflow.
 
-## 5. Workflow: notificar a la sede y a facturación
+## 5. Workflow: notificar a la sede y al grupo de domicilios
 
 - ID: `650f1434-4e4c-4c56-a25f-0abb01bf5e4a`
 - Permitir reingreso: sí.
@@ -117,12 +117,13 @@ El campo ya contiene un resumen compacto para que el cliente confirme nombre, te
 
 Para recoger, el destinatario es el contacto creado o actualizado con el WhatsApp de la sede. Para domicilio, es el contacto del centro logístico. El campo contiene cliente, teléfono, cédula, entrega, dirección separada por campos, productos, subtotal, notas y constancia de aceptación del tratamiento de datos.
 
-Cuando una cotización pasa a `Cotización aceptada`, la aplicación reutiliza este workflow para avisar al contacto definido por:
+Cuando una cotización pasa a `Cotización aceptada` (el cliente pulsa `Aprobar` o un asesor la confirma en el dashboard), la aplicación reutiliza este workflow, con el mismo formato de mensaje, para enviar el pedido al grupo de WhatsApp de domicilios. El grupo se identifica por su ID de contacto en Órbita, que es el último segmento de la URL del contacto (`.../contacts/detail/<ID>`):
 
 ```text
-ORBITA_BILLING_WHATSAPP_NUMBER=
-ORBITA_BILLING_CONTACT_NAME=Facturación
+ORBITA_ORDERS_GROUP_CONTACT_ID=72jZuNAuZrzHccn5JWir
 ```
+
+El aviso se envía antes de dejar el pedido como aceptado: si falla, el pedido vuelve a `Cotización enviada`. `Pedido listo`, `Pedido enviado` y `Pedido entregado` solo se pueden marcar después de `Cotización aceptada`, así ningún pedido llega a despacho sin pasar por el grupo.
 
 ## 6. Continuar el flujo de cotización
 
@@ -133,6 +134,21 @@ Después del envío interactivo:
 3. En esa rama mueve la oportunidad de `000. Productos` a `Cotización Aceptada` y continúa las acciones actuales de aprobación.
 4. Crea otra rama para el ID `rechazar_cotizacion`, visible como `Rechazar`, y mueve la oportunidad a `Cotización no Aceptada` antes de continuar el flujo actual de rechazo.
 5. En timeout no apruebes ni rechaces automáticamente; crea el seguimiento interno que ya utilice la cuenta.
+
+### Webhook a la aplicación
+
+Al inicio de cada rama añade una acción **Webhook** (o *Custom Webhook*) para que el dashboard cambie de estado solo:
+
+- Método: `POST`
+- URL: `https://catalogo.puntosorganic.com/api/integrations/quote-response`
+- Header: `x-orbita-webhook-secret` con el valor de `ORBITA_QUOTE_WEBHOOK_SECRET`
+- Header: `Content-Type: application/json`
+- Cuerpo en la rama Aprobar: `{"contactId": "{{contact.id}}", "decision": "aprobar"}`
+- Cuerpo en la rama Rechazar: `{"contactId": "{{contact.id}}", "decision": "rechazar"}`
+
+La aplicación toma la cotización enviada más reciente de ese contacto. Con `aprobar` la marca `Cotización aceptada` y envía el pedido al grupo de domicilios; con `rechazar` la marca `Cotización no aceptada`. Responde `{"matched": false}` si el contacto no tiene una cotización enviada pendiente (por ejemplo, un reintento) y `502` si no pudo avisar al grupo, en cuyo caso el pedido queda en `Cotización enviada` para confirmarlo desde el dashboard.
+
+Las cotizaciones corregidas usan el workflow de reenvío, que no tiene botones: en ese caso el asesor confirma con el botón **Confirmar** de la lista de pedidos, que envía el mismo aviso al grupo.
 
 goGHL.ai documenta que el ID del `quick_reply` alimenta la rama correspondiente. Confirma en una prueba si el filtro del workflow expone el ID o el texto visible y selecciona el valor real que aparezca en el historial.
 

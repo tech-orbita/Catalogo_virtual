@@ -1,9 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCatalogName } from "@/lib/catalog-name";
-import { getDashboardRole } from "@/lib/auth/access";
+import { canAccessOrders, getDashboardRole } from "@/lib/auth/access";
+import { ACCEPTANCE_REQUIRED_MESSAGE, canMoveToStatus, isAcceptedOrLater } from "@/lib/order-stages";
+import { notifyAcceptedQuoteToOrdersGroup } from "@/lib/orders-group-notification";
+import {
+  CATALOG_CONTACT_COOKIE,
+  verifyCatalogContactToken,
+} from "@/lib/catalog-contact-link";
 import {
   createCrmContactNote,
   CrmConfigurationError,
@@ -407,7 +414,9 @@ async function prepareCrmContact(
       source: source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
     };
     const resolvedContactId = contactId
-      ? await updateCrmContactById(contactId, contactInput)
+      ? await updateCrmContactById(contactId, contactInput, {
+          preserveConflictingIdentity: true,
+        })
       : await upsertCrmContact(contactInput);
     return { contactId: resolvedContactId, status: "sincronizado", error: null };
   } catch (error) {
@@ -417,6 +426,19 @@ async function prepareCrmContact(
       error: errorMessage(error).slice(0, 500),
     };
   }
+}
+
+async function linkedCatalogContactId() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(CATALOG_CONTACT_COOKIE)?.value;
+  if (!token) return null;
+
+  const payload = verifyCatalogContactToken(token);
+  if (!payload) {
+    cookieStore.delete(CATALOG_CONTACT_COOKIE);
+    return null;
+  }
+  return payload.contactId;
 }
 
 async function resolveCatalogSalesOrigin(
@@ -752,7 +774,11 @@ export async function createOrder(
   });
   if ("error" in locationResult) return locationResult;
 
-  const crm = await prepareCrmContact(customerInput, "catalogo");
+  const crm = await prepareCrmContact(
+    customerInput,
+    "catalogo",
+    await linkedCatalogContactId()
+  );
   const salesOriginResult = await resolveCatalogSalesOrigin(crm.contactId);
   const salesOrigin = salesOriginResult.origin;
   const rpcInput = buildRpcInput(customerInput, resolved.items, crm, salesOrigin);
@@ -988,7 +1014,7 @@ export async function updateOrderCustomer(orderId: string, input: UpdateOrderCus
 export async function updateOrderStatus(orderId: string, status: OrderStatus) {
   if (!ORDER_STATUSES.has(status)) return { error: "Estado de pedido inválido." };
   const { supabase, user, role } = await requireAdmin();
-  if (!user || role !== "admin") return { error: "No autorizado." };
+  if (!user || !canAccessOrders(role)) return { error: "No autorizado." };
 
   const { data: order, error: orderError } = await supabase
     .from("orders")
@@ -996,6 +1022,35 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
     .eq("id", orderId)
     .maybeSingle();
   if (orderError || !order) return { error: orderError?.message ?? "El pedido no existe." };
+
+  const previousStatus = order.status as OrderStatus;
+  if (!canMoveToStatus(previousStatus, status)) return { error: ACCEPTANCE_REQUIRED_MESSAGE };
+
+  // El aviso al grupo de domicilios se envía antes de guardar el estado: si falla,
+  // el pedido no queda como aceptado y no puede avanzar a pedido listo sin aviso.
+  if (status === "cotizacion_aceptada" && !isAcceptedOrLater(previousStatus)) {
+    try {
+      await notifyAcceptedQuoteToOrdersGroup(order);
+    } catch (notifyError) {
+      return {
+        error: `No se pudo enviar el pedido al grupo de domicilios; el estado no cambió. ${errorMessage(notifyError)}`,
+      };
+    }
+    const { data: latestAttempt, error: attemptLookupError } = await supabase
+      .from("order_quote_attempts")
+      .select("id")
+      .eq("order_id", orderId)
+      .eq("status", "requested")
+      .order("revision", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!attemptLookupError && latestAttempt) {
+      await supabase
+        .from("order_quote_attempts")
+        .update({ accepted_notified_at: new Date().toISOString() })
+        .eq("id", latestAttempt.id);
+    }
+  }
 
   const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
   if (error) return { error: error.message };
@@ -1035,49 +1090,6 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
         ghl_synced_at: new Date().toISOString(),
       })
       .eq("id", orderId);
-
-    if (status === "cotizacion_aceptada" && order.status !== "cotizacion_aceptada") {
-      const billingPhone = process.env.ORBITA_BILLING_WHATSAPP_NUMBER?.trim();
-      if (!billingPhone) {
-        throw new CrmConfigurationError(
-          "Configura ORBITA_BILLING_WHATSAPP_NUMBER para avisar a facturación cuando acepten una cotización."
-        );
-      }
-      const billingContactId = await upsertCrmContact({
-        name: process.env.ORBITA_BILLING_CONTACT_NAME?.trim() || "Facturación",
-        phone: billingPhone,
-        source: "Alertas de cotizaciones aceptadas - catálogo virtual",
-      });
-      await triggerCrmNewOrderNotificationWorkflow(
-        billingContactId,
-        [
-          `Cotización aceptada #${order.order_number}`,
-          `Cliente: ${order.customer_name}`,
-          `Cédula: ${order.customer_cedula}`,
-          `Teléfono: ${order.customer_phone}`,
-          `Total: ${Number(order.total).toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 })}`,
-          `Entrega: ${order.delivery_method === "domicilio" ? "Domicilio" : "Recoger en tienda"}`,
-          order.location_name_snapshot ? `Sede: ${order.location_name_snapshot}` : null,
-          "Revisar facturación y continuar la preparación del pedido.",
-        ]
-          .filter(Boolean)
-          .join("\n")
-      );
-      const { data: latestAttempt, error: attemptLookupError } = await supabase
-        .from("order_quote_attempts")
-        .select("id")
-        .eq("order_id", orderId)
-        .eq("status", "requested")
-        .order("revision", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!attemptLookupError && latestAttempt) {
-        await supabase
-          .from("order_quote_attempts")
-          .update({ accepted_notified_at: new Date().toISOString() })
-          .eq("id", latestAttempt.id);
-      }
-    }
   } catch (syncError) {
     const warning = `El estado local cambió, pero el CRM no se pudo sincronizar: ${errorMessage(syncError)}`;
     await supabase
@@ -1099,7 +1111,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
 export async function updatePaymentStatus(orderId: string, paymentStatus: PaymentStatus) {
   if (!PAYMENT_STATUSES.has(paymentStatus)) return { error: "Estado de pago inválido." };
   const { supabase, user, role } = await requireAdmin();
-  if (!user || role !== "admin") return { error: "No autorizado." };
+  if (!user || !canAccessOrders(role)) return { error: "No autorizado." };
 
   const { error } = await supabase
     .from("orders")
@@ -1179,7 +1191,7 @@ export async function triggerOrderQuoteWorkflow(
 
   let contactId: string;
   try {
-    contactId = await upsertCrmContact({
+    const crmInput = {
       name: order.customer_name,
       email: order.customer_email,
       phone: order.customer_phone,
@@ -1190,7 +1202,12 @@ export async function triggerOrderQuoteWorkflow(
       city: order.city,
       department: order.department,
       source: order.order_source === "asesor" ? "Catálogo virtual - asesor" : "Catálogo virtual - web",
-    });
+    };
+    contactId = order.ghl_contact_id
+      ? await updateCrmContactById(order.ghl_contact_id, crmInput, {
+          preserveConflictingIdentity: true,
+        })
+      : await upsertCrmContact(crmInput);
   } catch (error) {
     const message = errorMessage(error).slice(0, 500);
     const { error: attemptError } = await supabase.from("order_quote_attempts").insert({

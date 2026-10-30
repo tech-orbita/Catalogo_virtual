@@ -10,31 +10,7 @@ import type { OrderStatus, OrderWithItems, PaymentStatus } from "@/lib/types";
 import { OrderQuoteBuilder, type QuoteCatalogOption } from "./OrderQuoteBuilder";
 import { OrderCustomerEditor } from "./OrderCustomerEditor";
 import { PaymentBadge, StatusBadge } from "./OrdersTable";
-
-const NEXT_ORDER_STAGE: Partial<
-  Record<OrderStatus, { status: OrderStatus; label: string; description: string }>
-> = {
-  cotizacion_enviada: {
-    status: "cotizacion_aceptada",
-    label: "Marcar cotización aceptada",
-    description: "Continúa cuando el cliente confirme la cotización.",
-  },
-  cotizacion_aceptada: {
-    status: "pedido_listo",
-    label: "Marcar pedido listo",
-    description: "Indica que el pedido ya está preparado.",
-  },
-  pedido_listo: {
-    status: "pedido_enviado",
-    label: "Marcar como enviado",
-    description: "Informa que el pedido ya salió de la sede.",
-  },
-  pedido_enviado: {
-    status: "pedido_entregado",
-    label: "Marcar como entregado",
-    description: "Finaliza el seguimiento cuando llegue al cliente.",
-  },
-};
+import { NEXT_ORDER_STAGE, canMoveToStatus } from "@/lib/order-stages";
 
 export function OrderDetail({
   order,
@@ -75,7 +51,13 @@ export function OrderDetail({
     const warning = "warning" in result ? result.warning : undefined;
     setFeedback(warning ?? null);
     if (warning) toast.warning("Estado actualizado con una novedad", { description: warning });
-    else toast.success("Estado del pedido actualizado", { description: ORDER_STATUS_LABELS[next] });
+    else
+      toast.success("Estado del pedido actualizado", {
+        description:
+          next === "cotizacion_aceptada"
+            ? `${ORDER_STATUS_LABELS[next]}. Pedido enviado al grupo de domicilios.`
+            : ORDER_STATUS_LABELS[next],
+      });
     setIsUpdatingStatus(false);
     router.refresh();
   }
@@ -148,8 +130,8 @@ export function OrderDetail({
                     disabled={isUpdatingStatus}
                     className="mt-2 block min-h-12 w-full rounded-xl border border-slate-300 bg-white px-3 text-base font-semibold text-slate-900 outline-none transition focus:border-orbita-cyan-dark focus:ring-4 focus:ring-orbita-cyan/10 disabled:cursor-wait disabled:bg-slate-100"
                   >
-                    {Object.entries(ORDER_STATUS_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
+                    {(Object.entries(ORDER_STATUS_LABELS) as [OrderStatus, string][]).map(([value, label]) => (
+                      <option key={value} value={value} disabled={!canMoveToStatus(status, value)}>{label}</option>
                     ))}
                   </select>
                 </label>

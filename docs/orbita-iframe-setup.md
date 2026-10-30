@@ -107,6 +107,24 @@ La app ejecuta solamente estas operaciones:
 
 El número remitente, el proveedor y los botones no se envían por la API de conversaciones. Si las keys versionadas no existen en la subcuenta o el workflow no está publicado, el pedido no cambia a cotización enviada.
 
+## Enlace firmado desde WhatsApp al catálogo
+
+Para conservar el contacto que inició una conversación mediante nombre de usuario de WhatsApp, el workflow debe pedir un enlace firmado antes de mostrar el botón del catálogo.
+
+1. Configura en el despliegue `ORBITA_CATALOG_LINK_SIGNING_SECRET` y `ORBITA_CATALOG_LINK_API_SECRET` con valores diferentes y aleatorios de al menos 32 caracteres, además de `ORBITA_PUBLIC_CATALOG_URL`.
+2. Desde un Custom Webhook del workflow llama `POST /api/integrations/catalog-link`.
+3. Envía `x-orbita-catalog-secret` con el valor de `ORBITA_CATALOG_LINK_API_SECRET` y este JSON:
+
+```json
+{
+  "contactId": "{{contact.id}}"
+}
+```
+
+4. Guarda la propiedad `url` de la respuesta en un campo de contacto y usa ese campo como URL del botón que abre el catálogo.
+
+El enlace dura 24 horas. Al abrirlo, `/vincular/[token]` valida la firma, retira el token de la barra del navegador mediante una redirección y guarda la asociación en una cookie `HttpOnly`, `SameSite=Lax` y segura en producción. El checkout nunca acepta un `contactId` enviado por el navegador: lo recupera exclusivamente del token firmado. Si el teléfono o correo escrito en el checkout pertenece a otro registro, el contacto de WhatsApp se conserva para la mensajería y el dato conflictivo no se duplica en GHL.
+
 Al crear un pedido desde el catálogo, la app guarda el resumen completo como nota del contacto, actualiza `contact.confirmacion_nuevo_pedido` y activa el workflow publicado de confirmación del cliente. Para recoger, toma `store_locations.whatsapp_number`, crea o actualiza el contacto operativo de la sede, actualiza `contact.notificacion_nuevo_pedido` y vuelve a añadirlo al workflow publicado de notificación. Para domicilio no acepta sede desde el navegador: usa el contacto del centro logístico configurado en `ORBITA_LOGISTICS_WHATSAPP_NUMBER`. Ambos workflows deben permitir reingreso para recibir pedidos sucesivos.
 
 Las oportunidades usan el nombre del cliente, una referencia de cuatro dígitos y la proveniencia: `Nombre del cliente · CT #0026 · Venecia` para un contacto cuyo tag `wa:` coincide con la sede Venecia, y `Nombre del cliente · Manual #0026 · Venecia` para un pedido creado desde el dashboard por un usuario asociado a esa sede. Nunca se incluye el correo del usuario. Si no hay una sede asociada, el contacto es nuevo, no tiene tag `wa:` o el número del tag no coincide con ninguna sede, la proveniencia queda como `Catálogo virtual`. El mismo nombre se conserva al cambiar la oportunidad de etapa o reenviar la cotización.

@@ -45,7 +45,7 @@ export default async function PedidosPage({
         ) : null}
       />
       <div className="admin-enter p-4 sm:p-6">
-        <OrdersTable orders={orders} total={total} page={page} totalPages={totalPages} locations={locations} />
+        <OrdersTable orders={orders} total={total} page={page} totalPages={totalPages} locations={locations} canManageOrders={canManageOrders} />
       </div>
     </>
   );

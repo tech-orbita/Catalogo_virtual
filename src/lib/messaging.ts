@@ -43,10 +43,11 @@ type OrderMessageInput = {
 
 function appendOrderItems(lines: string[], items: OrderMessageInput["items"]) {
   for (const item of items) {
-    const label = item.variantLabel
-      ? `${item.productName} (${item.variantLabel})`
+    const variantLabel = compactVariantLabel(item.variantLabel ?? null);
+    const label = variantLabel
+      ? `${item.productName} (${variantLabel})`
       : item.productName;
-    lines.push(`- ${label} x${item.quantity}: ${formatCOP(item.subtotal)}`);
+    lines.push(`- ${label} ×${item.quantity}: ${formatQuotePrice(item.subtotal)}`);
   }
 }
 
@@ -121,7 +122,7 @@ export function buildOperationalOrderAlert(order: OrderMessageInput): string {
 
   lines.push("", "Productos:");
   appendOrderItems(lines, order.items);
-  lines.push("", `Subtotal de productos: ${formatCOP(order.subtotal)}`);
+  lines.push("", `Subtotal de productos: ${formatQuotePrice(order.subtotal)}`);
   if (order.notes) lines.push("", `Notas: ${order.notes}`);
   if (order.privacyAccepted) {
     lines.push("", `Tratamiento de datos: Aceptado (${DATA_POLICY_URL})`);

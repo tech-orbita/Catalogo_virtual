@@ -3,8 +3,11 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Download, Search } from "lucide-react";
+import { ArrowRight, Download, Loader2, Search } from "lucide-react";
+import { updateOrderStatus } from "@/actions/orders";
+import { useToast } from "@/components/ui/Toast";
 import { formatCOP } from "@/lib/currency";
+import { NEXT_ORDER_STAGE, canMoveToStatus } from "@/lib/order-stages";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/lib/types";
 import type { Order, OrderStatus, PaymentStatus } from "@/lib/types";
 import type { StoreLocation } from "@/lib/types";
@@ -15,12 +18,14 @@ export function OrdersTable({
   page,
   totalPages,
   locations,
+  canManageOrders,
 }: {
   orders: Order[];
   total: number;
   page: number;
   totalPages: number;
   locations: StoreLocation[];
+  canManageOrders: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -109,18 +114,14 @@ export function OrdersTable({
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-black/5 bg-white">
-        <table className="min-w-[960px] w-full text-sm">
+        <table className="min-w-[760px] w-full text-sm">
           <thead>
             <tr className="border-b border-black/5 text-left text-xs uppercase tracking-wide text-black/40">
               <th className="p-3">Pedido</th>
-              <th className="p-3">Fecha</th>
               <th className="p-3">Comprador</th>
-              <th className="p-3">Cédula</th>
-              <th className="p-3">Origen</th>
               <th className="p-3">Entrega</th>
               <th className="p-3">Valor</th>
-              <th className="p-3">Estado</th>
-              <th className="p-3">Pago</th>
+              <th className="p-3">{canManageOrders ? "Acción" : "Estado"}</th>
               <th className="p-3" />
             </tr>
           </thead>
@@ -128,14 +129,7 @@ export function OrdersTable({
             {orders.map((order) => (
               <tr key={order.id} className="border-b border-black/5 last:border-0 hover:bg-black/[0.02]">
                 <td className="p-3 font-medium">#{order.order_number}</td>
-                <td className="p-3 text-black/50">
-                  {new Date(order.created_at).toLocaleDateString("es-CO")}
-                </td>
                 <td className="p-3">{order.customer_name}</td>
-                <td className="p-3 text-black/50">{order.customer_cedula}</td>
-                <td className="p-3 text-black/50">
-                  {order.sales_origin_label || (order.order_source === "asesor" ? "Asesor" : "Catálogo virtual")}
-                </td>
                 <td className="p-3 text-black/50">
                   <span className="capitalize">{order.delivery_method}</span>
                   {order.location_name_snapshot && (
@@ -145,12 +139,13 @@ export function OrdersTable({
                   )}
                 </td>
                 <td className="p-3 font-medium">{formatCOP(order.total)}</td>
-                <td className="p-3">
-                  <StatusBadge status={order.status} />
-                </td>
-                <td className="p-3">
-                  <PaymentBadge status={order.payment_status} />
-                </td>
+                {canManageOrders ? (
+                  <OrderStageCell order={order} />
+                ) : (
+                  <td className="p-3">
+                    <StatusBadge status={order.status} />
+                  </td>
+                )}
                 <td className="p-3">
                   <Link
                     href={`/admin/pedidos/${order.id}`}
@@ -190,6 +185,81 @@ export function OrdersTable({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Estado y botón de siguiente paso para cambiar la etapa desde la lista
+ * sin abrir el pedido.
+ */
+function OrderStageCell({ order }: { order: Order }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [status, setStatus] = useState<OrderStatus>(order.status);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const nextStage = NEXT_ORDER_STAGE[status];
+
+  async function changeStatus(next: OrderStatus) {
+    if (next === status || isUpdating) return;
+    const previous = status;
+    setIsUpdating(true);
+    setStatus(next);
+    const result = await updateOrderStatus(order.id, next);
+    setIsUpdating(false);
+    if ("error" in result && result.error) {
+      setStatus(previous);
+      toast.error(`No se pudo actualizar el pedido #${order.order_number}`, { description: result.error });
+      return;
+    }
+    const warning = "warning" in result ? result.warning : undefined;
+    if (warning) toast.warning(`Pedido #${order.order_number} actualizado con una novedad`, { description: warning });
+    else
+      toast.success(`Pedido #${order.order_number}: ${ORDER_STATUS_LABELS[next]}`, {
+        description: next === "cotizacion_aceptada" ? "Pedido enviado al grupo de domicilios." : undefined,
+      });
+    router.refresh();
+  }
+
+  return (
+    <td className="p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={status}
+          onChange={(event) => changeStatus(event.target.value as OrderStatus)}
+          disabled={isUpdating}
+          aria-label={`Estado del pedido #${order.order_number}`}
+          className={`max-w-[11rem] cursor-pointer rounded-full border-0 py-1 pl-2.5 pr-7 text-xs font-medium outline-none focus:ring-2 focus:ring-orbita-cyan/40 disabled:cursor-wait disabled:opacity-60 ${STATUS_COLORS[status]}`}
+        >
+          {(Object.entries(ORDER_STATUS_LABELS) as [OrderStatus, string][]).map(([value, label]) => (
+            <option key={value} value={value} disabled={!canMoveToStatus(status, value)}>{label}</option>
+          ))}
+        </select>
+        {nextStage ? (
+          <button
+            type="button"
+            onClick={() => changeStatus(nextStage.status)}
+            disabled={isUpdating}
+            title={
+              nextStage.status === "cotizacion_aceptada"
+                ? "Marca la cotización aceptada y envía el pedido al grupo de domicilios."
+                : nextStage.description
+            }
+            className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-orbita-navy px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orbita-navy/90 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isUpdating ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : null}
+            {nextStage.shortLabel}
+            {isUpdating ? null : <ArrowRight size={14} aria-hidden="true" />}
+          </button>
+        ) : status === "pedido_realizado" ? (
+          <Link
+            href={`/admin/pedidos/${order.id}`}
+            className="inline-flex min-h-8 items-center whitespace-nowrap rounded-lg border border-orbita-cyan/50 px-3 py-1.5 text-xs font-semibold text-orbita-navy transition hover:bg-orbita-cyan-soft"
+          >
+            Cotizar
+          </Link>
+        ) : null}
+      </div>
+    </td>
   );
 }
 
