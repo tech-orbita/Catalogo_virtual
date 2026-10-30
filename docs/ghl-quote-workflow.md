@@ -137,14 +137,16 @@ Después del envío interactivo:
 
 ### Webhook a la aplicación
 
-Al inicio de cada rama añade una acción **Webhook** (o *Custom Webhook*) para que el dashboard cambie de estado solo:
+Al inicio de cada rama añade una acción **Webhook** para que el dashboard cambie de estado solo:
 
 - Método: `POST`
 - URL: `https://catalogo.puntosorganic.com/api/integrations/quote-response`
-- Header: `x-orbita-webhook-secret` con el valor de `ORBITA_QUOTE_WEBHOOK_SECRET`
-- Header: `Content-Type: application/json`
-- Cuerpo en la rama Aprobar: `{"contactId": "{{contact.id}}", "decision": "aprobar"}`
-- Cuerpo en la rama Rechazar: `{"contactId": "{{contact.id}}", "decision": "rechazar"}`
+- El cuerpo no se edita: Órbita ya envía `contact_id` con los datos del contacto.
+- En **Datos personalizados** (*Custom Data*) añade dos pares clave/valor:
+  - `decision` = `aprobar` en la rama Aprobar, o `rechazar` en la rama Rechazar.
+  - `secret` = el valor de `ORBITA_QUOTE_WEBHOOK_SECRET`.
+
+Órbita los envía dentro de `customData`. Si la acción permite headers, también se acepta el secreto en `x-orbita-webhook-secret`.
 
 La aplicación toma la cotización enviada más reciente de ese contacto. Con `aprobar` la marca `Cotización aceptada` y envía el pedido al grupo de domicilios; con `rechazar` la marca `Cotización no aceptada`. Responde `{"matched": false}` si el contacto no tiene una cotización enviada pendiente (por ejemplo, un reintento) y `502` si no pudo avisar al grupo, en cuyo caso el pedido queda en `Cotización enviada` para confirmarlo desde el dashboard.
 

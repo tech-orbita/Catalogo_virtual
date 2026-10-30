@@ -7,6 +7,18 @@ export const runtime = "nodejs";
 
 type QuoteDecision = "aprobar" | "rechazar";
 
+type WebhookFields = {
+  contactId?: unknown;
+  contact_id?: unknown;
+  decision?: unknown;
+  secret?: unknown;
+};
+
+type WebhookBody = WebhookFields & {
+  customData?: WebhookFields;
+  custom_data?: WebhookFields;
+};
+
 function safeEqual(left: string, right: string) {
   const leftDigest = createHash("sha256").update(left).digest();
   const rightDigest = createHash("sha256").update(right).digest();
@@ -44,26 +56,32 @@ function revalidateOrders(orderId: string) {
  */
 export async function POST(request: Request) {
   const expectedSecret = process.env.ORBITA_QUOTE_WEBHOOK_SECRET?.trim();
-  const suppliedSecret = request.headers.get("x-orbita-webhook-secret")?.trim() ?? "";
   if (!expectedSecret) {
     return Response.json({ error: "Configura ORBITA_QUOTE_WEBHOOK_SECRET." }, { status: 503 });
   }
-  if (!suppliedSecret || !safeEqual(expectedSecret, suppliedSecret)) {
-    return Response.json({ error: "No autorizado." }, { status: 401 });
-  }
 
-  let body: { contactId?: unknown; contact_id?: unknown; decision?: unknown };
+  let body: WebhookBody;
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "El cuerpo debe ser JSON." }, { status: 400 });
   }
-  const rawContactId = body.contactId ?? body.contact_id;
+  // El webhook saliente de Órbita envía los datos del contacto en la raíz
+  // (contact_id) y los "datos personalizados" dentro de customData.
+  const customData = body.customData ?? body.custom_data ?? {};
+  const rawSecret =
+    request.headers.get("x-orbita-webhook-secret") ?? customData.secret ?? body.secret;
+  const suppliedSecret = typeof rawSecret === "string" ? rawSecret.trim() : "";
+  if (!suppliedSecret || !safeEqual(expectedSecret, suppliedSecret)) {
+    return Response.json({ error: "No autorizado." }, { status: 401 });
+  }
+
+  const rawContactId = body.contact_id ?? body.contactId ?? customData.contactId ?? customData.contact_id;
   const contactId = typeof rawContactId === "string" ? rawContactId.trim() : "";
-  const decision = parseDecision(body.decision);
+  const decision = parseDecision(customData.decision ?? body.decision);
   if (!/^[A-Za-z0-9_-]{8,100}$/.test(contactId) || !decision) {
     return Response.json(
-      { error: "Envía contactId y decision (aprobar o rechazar)." },
+      { error: "Envía contact_id y, en customData, decision (aprobar o rechazar)." },
       { status: 400 }
     );
   }
