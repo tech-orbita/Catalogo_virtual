@@ -10,6 +10,7 @@ const CRM_WORKFLOW_IDS = {
   resendQuote: "ae18a7df-b54e-4e0c-998b-b713d661a762",
   storeNotification: "650f1434-4e4c-4c56-a25f-0abb01bf5e4a",
   customerNotification: "7280e96d-7915-4dc4-9cc7-e9ee4034790c",
+  ordersGroup: "a659c673-0886-4527-bc8e-f958de361e4a",
 } as const;
 const CRM_MESSAGE_FIELD_KEYS = {
   identificationNumber: "nmero_de_identificacin",
@@ -864,6 +865,24 @@ export async function triggerCrmOrderConfirmationWorkflow(contactId: string, mes
     workflowId: CRM_WORKFLOW_IDS.customerNotification,
     configurationError:
       "Configura el campo y el workflow de confirmación de pedidos para clientes.",
+  });
+}
+
+/**
+ * Workflow exclusivo del grupo de domicilios: su única acción es "Send WhatsApp
+ * Group Message" con el campo de notificación del contacto inscrito. Va aparte
+ * del workflow de la sede porque ese se activa con cada pedido nuevo.
+ */
+export async function triggerCrmOrdersGroupWorkflow(contactId: string, message: string) {
+  return triggerCrmMessageWorkflow({
+    contactId,
+    message,
+    customFieldKey: CRM_MESSAGE_FIELD_KEYS.storeNotification,
+    workflowId:
+      readEnv("ORBITA_CRM_ORDERS_GROUP_WORKFLOW_ID", "GHL_ORDERS_GROUP_WORKFLOW_ID") ??
+      CRM_WORKFLOW_IDS.ordersGroup,
+    configurationError:
+      "Configura ORBITA_CRM_ORDERS_GROUP_WORKFLOW_ID con el workflow que envía al grupo de domicilios.",
   });
 }
 

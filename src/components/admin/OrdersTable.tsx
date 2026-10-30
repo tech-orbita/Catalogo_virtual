@@ -226,7 +226,7 @@ function OrderStageCell({ order }: { order: Order }) {
     if (warning) toast.warning(`Pedido #${order.order_number} actualizado con una novedad`, { description: warning });
     else
       toast.success(`Pedido #${order.order_number}: ${ORDER_STATUS_LABELS[next]}`, {
-        description: next === "cotizacion_aceptada" ? "Pedido enviado al grupo de domicilios." : undefined,
+        description: "notifiedTo" in result && result.notifiedTo ? `Aviso enviado a ${result.notifiedTo}.` : undefined,
       });
     router.refresh();
   }
@@ -263,7 +263,7 @@ function OrderStageCell({ order }: { order: Order }) {
             disabled={isUpdating}
             title={
               nextStage.status === "cotizacion_aceptada"
-                ? "Marca la cotización aceptada y envía el pedido al grupo de domicilios."
+                ? "Marca la cotización aceptada y avisa al grupo de domicilios o a la sede."
                 : nextStage.description
             }
             className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-orbita-navy px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orbita-navy/90 disabled:cursor-wait disabled:opacity-60"

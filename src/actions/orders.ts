@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { normalizeCatalogName } from "@/lib/catalog-name";
 import { canAccessOrders, getDashboardRole } from "@/lib/auth/access";
 import { ACCEPTANCE_REQUIRED_MESSAGE, canMoveToStatus, isAcceptedOrLater } from "@/lib/order-stages";
-import { notifyAcceptedQuoteToOrdersGroup } from "@/lib/orders-group-notification";
+import { isDirectNotificationLocation, notifyAcceptedQuote } from "@/lib/orders-group-notification";
 import {
   CATALOG_CONTACT_COOKIE,
   verifyCatalogContactToken,
@@ -696,8 +696,22 @@ async function sendCreatedOrderNotifications(input: {
     warnings.push("No se pudo enviar la confirmación porque el contacto no quedó sincronizado.");
   }
 
-  const operationalRecipient =
-    input.customer.deliveryMethod === "domicilio"
+  // Los domicilios que llegan por la línea de una sede directa (20 de Julio) se
+  // avisan a esa sede; el resto va al centro logístico.
+  let directOriginLocation: { name: string; whatsapp_number: string } | null = null;
+  if (input.customer.deliveryMethod === "domicilio" && isDirectNotificationLocation(input.salesOriginLabel)) {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("store_locations")
+      .select("name, whatsapp_number")
+      .eq("name", input.salesOriginLabel)
+      .maybeSingle();
+    if (data?.whatsapp_number) directOriginLocation = data;
+  }
+
+  const operationalRecipient = directOriginLocation
+    ? { name: `Sede ${directOriginLocation.name}`, phone: directOriginLocation.whatsapp_number }
+    : input.customer.deliveryMethod === "domicilio"
       ? {
           name: "Centro logístico domicilios",
           phone: process.env.ORBITA_LOGISTICS_WHATSAPP_NUMBER?.trim() || "3508811341",
@@ -1026,14 +1040,16 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
   const previousStatus = order.status as OrderStatus;
   if (!canMoveToStatus(previousStatus, status)) return { error: ACCEPTANCE_REQUIRED_MESSAGE };
 
-  // El aviso al grupo de domicilios se envía antes de guardar el estado: si falla,
-  // el pedido no queda como aceptado y no puede avanzar a pedido listo sin aviso.
+  // El aviso a quien prepara el pedido (grupo de domicilios o sede) se envía antes
+  // de guardar el estado: si falla, el pedido no queda como aceptado y no puede
+  // avanzar a pedido listo sin aviso.
+  let notifiedTo: string | undefined;
   if (status === "cotizacion_aceptada" && !isAcceptedOrLater(previousStatus)) {
     try {
-      await notifyAcceptedQuoteToOrdersGroup(order);
+      notifiedTo = await notifyAcceptedQuote(order, supabase);
     } catch (notifyError) {
       return {
-        error: `No se pudo enviar el pedido al grupo de domicilios; el estado no cambió. ${errorMessage(notifyError)}`,
+        error: `No se pudo enviar el aviso del pedido aceptado; el estado no cambió. ${errorMessage(notifyError)}`,
       };
     }
     const { data: latestAttempt, error: attemptLookupError } = await supabase
@@ -1099,13 +1115,13 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
     revalidatePath("/admin");
     revalidatePath("/admin/pedidos");
     revalidatePath(`/admin/pedidos/${orderId}`);
-    return { success: true, warning };
+    return { success: true, warning, notifiedTo };
   }
 
   revalidatePath("/admin");
   revalidatePath("/admin/pedidos");
   revalidatePath(`/admin/pedidos/${orderId}`);
-  return { success: true };
+  return { success: true, notifiedTo };
 }
 
 export async function updatePaymentStatus(orderId: string, paymentStatus: PaymentStatus) {

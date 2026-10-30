@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
-import { notifyAcceptedQuoteToOrdersGroup, type AcceptedQuoteOrder } from "@/lib/orders-group-notification";
+import { notifyAcceptedQuote, type AcceptedQuoteOrder } from "@/lib/orders-group-notification";
 
 export const runtime = "nodejs";
 
@@ -52,7 +52,7 @@ function revalidateOrders(orderId: string) {
 
 /**
  * Lo llama el workflow de cotización de Órbita cuando el cliente pulsa
- * Aprobar o Rechazar. Al aprobar, el pedido se envía al grupo de domicilios.
+ * Aprobar o Rechazar. Al aprobar, avisa al grupo de domicilios o a la sede.
  */
 export async function POST(request: Request) {
   const expectedSecret = process.env.ORBITA_QUOTE_WEBHOOK_SECRET?.trim();
@@ -109,8 +109,9 @@ export async function POST(request: Request) {
     return Response.json({ matched: true, orderNumber: order.order_number, status: "cotizacion_no_aceptada" });
   }
 
+  let notifiedTo: string;
   try {
-    await notifyAcceptedQuoteToOrdersGroup(order);
+    notifiedTo = await notifyAcceptedQuote(order, supabase);
   } catch (notifyError) {
     await supabase.rpc("integration_finish_quote_acceptance", {
       p_secret: suppliedSecret,
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
     revalidateOrders(order.id);
     const message = notifyError instanceof Error ? notifyError.message : "Error desconocido.";
     return Response.json(
-      { error: `No se pudo enviar el pedido al grupo de domicilios: ${message}` },
+      { error: `No se pudo enviar el aviso del pedido aceptado: ${message}` },
       { status: 502 }
     );
   }
@@ -131,5 +132,5 @@ export async function POST(request: Request) {
     p_notified: true,
   });
   revalidateOrders(order.id);
-  return Response.json({ matched: true, orderNumber: order.order_number, status: "cotizacion_aceptada" });
+  return Response.json({ matched: true, orderNumber: order.order_number, status: "cotizacion_aceptada", notifiedTo });
 }

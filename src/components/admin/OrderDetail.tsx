@@ -54,8 +54,8 @@ export function OrderDetail({
     else
       toast.success("Estado del pedido actualizado", {
         description:
-          next === "cotizacion_aceptada"
-            ? `${ORDER_STATUS_LABELS[next]}. Pedido enviado al grupo de domicilios.`
+          "notifiedTo" in result && result.notifiedTo
+            ? `${ORDER_STATUS_LABELS[next]}. Aviso enviado a ${result.notifiedTo}.`
             : ORDER_STATUS_LABELS[next],
       });
     setIsUpdatingStatus(false);

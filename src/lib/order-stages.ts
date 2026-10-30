@@ -14,7 +14,7 @@ export const NEXT_ORDER_STAGE: Partial<Record<OrderStatus, NextOrderStage>> = {
     shortLabel: "Confirmar",
     label: "Marcar cotización aceptada",
     description:
-      "Envía el pedido al grupo de domicilios. Es obligatorio antes de marcarlo como listo.",
+      "Avisa al grupo de domicilios o a la sede. Es obligatorio antes de marcarlo como listo.",
   },
   cotizacion_aceptada: {
     status: "pedido_listo",
@@ -43,18 +43,18 @@ const POST_ACCEPTANCE_STATUSES = new Set<OrderStatus>([
   "pedido_entregado",
 ]);
 
-/** Indica si el pedido ya pasó por cotización aceptada (y avisó al grupo de domicilios). */
+/** Indica si el pedido ya pasó por cotización aceptada (y se avisó a quien lo prepara). */
 export function isAcceptedOrLater(status: OrderStatus) {
   return status === "cotizacion_aceptada" || POST_ACCEPTANCE_STATUSES.has(status);
 }
 
 /**
  * Nadie puede saltar a pedido listo, enviado o entregado sin marcar antes la
- * cotización aceptada: ese paso es el que envía el pedido al grupo de domicilios.
+ * cotización aceptada: ese paso es el que avisa al grupo de domicilios o a la sede.
  */
 export function canMoveToStatus(from: OrderStatus, to: OrderStatus) {
   return !POST_ACCEPTANCE_STATUSES.has(to) || isAcceptedOrLater(from);
 }
 
 export const ACCEPTANCE_REQUIRED_MESSAGE =
-  "Primero marca la cotización como aceptada: ese paso envía el pedido al grupo de domicilios.";
+  "Primero marca la cotización como aceptada: ese paso avisa al grupo de domicilios o a la sede.";

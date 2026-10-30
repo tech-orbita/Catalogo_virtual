@@ -117,10 +117,28 @@ El campo ya contiene un resumen compacto para que el cliente confirme nombre, te
 
 Para recoger, el destinatario es el contacto creado o actualizado con el WhatsApp de la sede. Para domicilio, es el contacto del centro logístico. El campo contiene cliente, teléfono, cédula, entrega, dirección separada por campos, productos, subtotal, notas y constancia de aceptación del tratamiento de datos.
 
-Cuando una cotización pasa a `Cotización aceptada` (el cliente pulsa `Aprobar` o un asesor la confirma en el dashboard), la aplicación reutiliza este workflow, con el mismo formato de mensaje, para enviar el pedido al grupo de WhatsApp de domicilios. El grupo se identifica por su ID de contacto en Órbita, que es el último segmento de la URL del contacto (`.../contacts/detail/<ID>`):
+Este workflow solo debe tener la acción `Send WhatsApp Message`: se activa con cada pedido nuevo, así que no puede publicar en el grupo de domicilios.
+
+### Workflow del grupo de domicilios
+
+Al aceptar una cotización se avisa a quien prepara el pedido, con el mismo formato de mensaje:
+
+- **Recoger:** la sede elegida, por el workflow `000. Notificar a la Sede`.
+- **Domicilio de un cliente que llegó por la línea de la sede 20 de Julio:** esa sede, por el mismo workflow. Las sedes directas se configuran con `ORBITA_DIRECT_NOTIFICATION_LOCATIONS` (por defecto `20 de julio`, separadas por coma).
+- **Resto de domicilios:** el grupo de WhatsApp de domicilios, por el workflow descrito abajo.
+
+El aviso de pedido nuevo sigue la misma regla: un domicilio que llega por la línea del 20 de Julio se avisa a esa sede en lugar del centro logístico.
+
+Cuando una cotización pasa a `Cotización aceptada` (el cliente pulsa `Aprobar` o un asesor la confirma en el dashboard), la aplicación guarda el mensaje en el campo `contact.notificacion_nuevo_pedido` del contacto del grupo y lo inscribe en un workflow aparte:
+
+- Sin trigger y con reingreso permitido.
+- Única acción: `Send WhatsApp Group Message`, mensaje `{{contact.notificacion_nuevo_pedido}}`, grupo `Domicilio Órganic`.
 
 ```text
+# Último segmento de la URL del contacto del grupo (.../contacts/detail/<ID>)
 ORBITA_ORDERS_GROUP_CONTACT_ID=72jZuNAuZrzHccn5JWir
+# ID del workflow, tomado de su URL (.../workflow/<ID>)
+ORBITA_CRM_ORDERS_GROUP_WORKFLOW_ID=a659c673-0886-4527-bc8e-f958de361e4a
 ```
 
 El aviso se envía antes de dejar el pedido como aceptado: si falla, el pedido vuelve a `Cotización enviada`. `Pedido listo`, `Pedido enviado` y `Pedido entregado` solo se pueden marcar después de `Cotización aceptada`, así ningún pedido llega a despacho sin pasar por el grupo.
