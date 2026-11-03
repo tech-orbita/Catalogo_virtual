@@ -1,7 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
-import { notifyAcceptedQuote, type AcceptedQuoteOrder } from "@/lib/orders-group-notification";
 
 export const runtime = "nodejs";
 
@@ -52,7 +51,8 @@ function revalidateOrders(orderId: string) {
 
 /**
  * Lo llama el workflow de cotización de Órbita cuando el cliente pulsa
- * Aprobar o Rechazar. Al aprobar, avisa al grupo de domicilios o a la sede.
+ * Aprobar o Rechazar. Solo cambia el estado: el aviso al grupo de domicilios o a
+ * la sede lo dispara el asesor al enviar el pedido a preparación desde el dashboard.
  */
 export async function POST(request: Request) {
   const expectedSecret = process.env.ORBITA_QUOTE_WEBHOOK_SECRET?.trim();
@@ -97,40 +97,17 @@ export async function POST(request: Request) {
     return Response.json({ error: error.message }, { status });
   }
 
-  const order = data as (AcceptedQuoteOrder & { id: string }) | null;
+  const order = data as { id: string; order_number: number } | null;
   if (!order) {
     // Sin cotización enviada pendiente para el contacto: puede ser un reintento
     // o una cotización ya gestionada manualmente desde el dashboard.
     return Response.json({ matched: false });
   }
 
-  if (decision === "rechazar") {
-    revalidateOrders(order.id);
-    return Response.json({ matched: true, orderNumber: order.order_number, status: "cotizacion_no_aceptada" });
-  }
-
-  let notifiedTo: string;
-  try {
-    notifiedTo = await notifyAcceptedQuote(order, supabase);
-  } catch (notifyError) {
-    await supabase.rpc("integration_finish_quote_acceptance", {
-      p_secret: suppliedSecret,
-      p_order_id: order.id,
-      p_notified: false,
-    });
-    revalidateOrders(order.id);
-    const message = notifyError instanceof Error ? notifyError.message : "Error desconocido.";
-    return Response.json(
-      { error: `No se pudo enviar el aviso del pedido aceptado: ${message}` },
-      { status: 502 }
-    );
-  }
-
-  await supabase.rpc("integration_finish_quote_acceptance", {
-    p_secret: suppliedSecret,
-    p_order_id: order.id,
-    p_notified: true,
-  });
   revalidateOrders(order.id);
-  return Response.json({ matched: true, orderNumber: order.order_number, status: "cotizacion_aceptada", notifiedTo });
+  return Response.json({
+    matched: true,
+    orderNumber: order.order_number,
+    status: decision === "aprobar" ? "cotizacion_aceptada" : "cotizacion_no_aceptada",
+  });
 }

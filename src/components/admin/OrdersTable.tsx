@@ -261,11 +261,7 @@ function OrderStageCell({ order }: { order: Order }) {
             type="button"
             onClick={() => changeStatus(nextStage.status)}
             disabled={isUpdating}
-            title={
-              nextStage.status === "cotizacion_aceptada"
-                ? "Marca la cotización aceptada y avisa al grupo de domicilios o a la sede."
-                : nextStage.description
-            }
+            title={nextStage.description}
             className="inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-lg bg-orbita-navy px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-orbita-navy/90 disabled:cursor-wait disabled:opacity-60"
           >
             {isUpdating ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : null}

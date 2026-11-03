@@ -121,7 +121,7 @@ Este workflow solo debe tener la acción `Send WhatsApp Message`: se activa con 
 
 ### Workflow del grupo de domicilios
 
-Al aceptar una cotización se avisa a quien prepara el pedido, con el mismo formato de mensaje:
+Cuando el asesor envía a preparación un pedido con la cotización aceptada se avisa a quien lo prepara, con el mismo formato de mensaje:
 
 - **Recoger:** la sede elegida, por el workflow `000. Notificar a la Sede`.
 - **Domicilio de un cliente que llegó por la línea de la sede 20 de Julio:** esa sede, por el mismo workflow. Las sedes directas se configuran con `ORBITA_DIRECT_NOTIFICATION_LOCATIONS` (por defecto `20 de julio`, separadas por coma).
@@ -129,7 +129,7 @@ Al aceptar una cotización se avisa a quien prepara el pedido, con el mismo form
 
 El aviso de pedido nuevo sigue la misma regla: un domicilio que llega por la línea del 20 de Julio se avisa a esa sede en lugar del centro logístico.
 
-Cuando una cotización pasa a `Cotización aceptada` (el cliente pulsa `Aprobar` o un asesor la confirma en el dashboard), la aplicación guarda el mensaje en el campo `contact.notificacion_nuevo_pedido` del contacto del grupo y lo inscribe en un workflow aparte:
+El aviso no sale al aceptar la cotización (ni cuando el cliente pulsa `Aprobar` ni cuando un asesor la confirma). Sale solo cuando el asesor revisa el pedido y pulsa **Enviar a preparación** en el dashboard, que lo pasa de `Cotización aceptada` a `Pedido listo`. En ese momento la aplicación guarda el mensaje en el campo `contact.notificacion_nuevo_pedido` del contacto del grupo y lo inscribe en un workflow aparte:
 
 - Sin trigger y con reingreso permitido.
 - Única acción: `Send WhatsApp Group Message`, mensaje `{{contact.notificacion_nuevo_pedido}}`, grupo `Domicilio Órganic`.
@@ -141,7 +141,7 @@ ORBITA_ORDERS_GROUP_CONTACT_ID=72jZuNAuZrzHccn5JWir
 ORBITA_CRM_ORDERS_GROUP_WORKFLOW_ID=a659c673-0886-4527-bc8e-f958de361e4a
 ```
 
-El aviso se envía antes de dejar el pedido como aceptado: si falla, el pedido vuelve a `Cotización enviada`. `Pedido listo`, `Pedido enviado` y `Pedido entregado` solo se pueden marcar después de `Cotización aceptada`, así ningún pedido llega a despacho sin pasar por el grupo.
+El aviso se envía antes de cambiar el estado: si falla, el pedido sigue en `Cotización aceptada`. `Pedido listo`, `Pedido enviado` y `Pedido entregado` solo se pueden marcar después de `Cotización aceptada`, así ningún pedido llega a despacho sin pasar por el grupo.
 
 ## 6. Continuar el flujo de cotización
 
@@ -166,9 +166,9 @@ Al inicio de cada rama añade una acción **Webhook** para que el dashboard camb
 
 Órbita los envía dentro de `customData`. Si la acción permite headers, también se acepta el secreto en `x-orbita-webhook-secret`.
 
-La aplicación toma la cotización enviada más reciente de ese contacto. Con `aprobar` la marca `Cotización aceptada` y envía el pedido al grupo de domicilios; con `rechazar` la marca `Cotización no aceptada`. Responde `{"matched": false}` si el contacto no tiene una cotización enviada pendiente (por ejemplo, un reintento) y `502` si no pudo avisar al grupo, en cuyo caso el pedido queda en `Cotización enviada` para confirmarlo desde el dashboard.
+La aplicación toma la cotización enviada más reciente de ese contacto. Con `aprobar` la marca `Cotización aceptada` (sin avisar a nadie todavía); con `rechazar` la marca `Cotización no aceptada`. Responde `{"matched": false}` si el contacto no tiene una cotización enviada pendiente (por ejemplo, un reintento).
 
-Las cotizaciones corregidas usan el workflow de reenvío, que no tiene botones: en ese caso el asesor confirma con el botón **Confirmar** de la lista de pedidos, que envía el mismo aviso al grupo.
+Las cotizaciones corregidas usan el workflow de reenvío, que no tiene botones: en ese caso el asesor marca la aceptación con el botón **Confirmar** de la lista de pedidos. En ambos casos el aviso al grupo sale después, con **Enviar a preparación**.
 
 goGHL.ai documenta que el ID del `quick_reply` alimenta la rama correspondiente. Confirma en una prueba si el filtro del workflow expone el ID o el texto visible y selecciona el valor real que aparezca en el historial.
 

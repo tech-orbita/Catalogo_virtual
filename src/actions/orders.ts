@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeCatalogName } from "@/lib/catalog-name";
 import { canAccessOrders, getDashboardRole } from "@/lib/auth/access";
-import { ACCEPTANCE_REQUIRED_MESSAGE, canMoveToStatus, isAcceptedOrLater } from "@/lib/order-stages";
+import { ACCEPTANCE_REQUIRED_MESSAGE, canMoveToStatus, sendsToPreparation } from "@/lib/order-stages";
 import { isDirectNotificationLocation, notifyAcceptedQuote } from "@/lib/orders-group-notification";
 import {
   CATALOG_CONTACT_COOKIE,
@@ -1040,31 +1040,34 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus) {
   const previousStatus = order.status as OrderStatus;
   if (!canMoveToStatus(previousStatus, status)) return { error: ACCEPTANCE_REQUIRED_MESSAGE };
 
-  // El aviso a quien prepara el pedido (grupo de domicilios o sede) se envía antes
-  // de guardar el estado: si falla, el pedido no queda como aceptado y no puede
-  // avanzar a pedido listo sin aviso.
+  // El aviso a quien prepara el pedido (grupo de domicilios o sede) solo sale cuando
+  // el asesor envía a preparación un pedido con cotización aceptada. Se envía antes
+  // de guardar el estado: si falla, el pedido sigue en cotización aceptada.
   let notifiedTo: string | undefined;
-  if (status === "cotizacion_aceptada" && !isAcceptedOrLater(previousStatus)) {
-    try {
-      notifiedTo = await notifyAcceptedQuote(order, supabase);
-    } catch (notifyError) {
-      return {
-        error: `No se pudo enviar el aviso del pedido aceptado; el estado no cambió. ${errorMessage(notifyError)}`,
-      };
-    }
+  if (sendsToPreparation(previousStatus, status)) {
     const { data: latestAttempt, error: attemptLookupError } = await supabase
       .from("order_quote_attempts")
-      .select("id")
+      .select("id, accepted_notified_at")
       .eq("order_id", orderId)
       .eq("status", "requested")
       .order("revision", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (!attemptLookupError && latestAttempt) {
-      await supabase
-        .from("order_quote_attempts")
-        .update({ accepted_notified_at: new Date().toISOString() })
-        .eq("id", latestAttempt.id);
+    // Pedidos aceptados con el flujo anterior ya avisaron al aceptar: no se repite.
+    if (!latestAttempt?.accepted_notified_at) {
+      try {
+        notifiedTo = await notifyAcceptedQuote(order, supabase);
+      } catch (notifyError) {
+        return {
+          error: `No se pudo enviar el pedido a preparación; el estado no cambió. ${errorMessage(notifyError)}`,
+        };
+      }
+      if (!attemptLookupError && latestAttempt) {
+        await supabase
+          .from("order_quote_attempts")
+          .update({ accepted_notified_at: new Date().toISOString() })
+          .eq("id", latestAttempt.id);
+      }
     }
   }
 
